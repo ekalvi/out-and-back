@@ -28,8 +28,29 @@ function solveSpeedFromPower({ power, cda, mass, vhwMs, gradePct, crr, lossDtPct
   return v;
 }
 
+function findPowerForAvg({ targetAvg, fixedPower, fixedLeg, physics, vhwOutMs, vhwBackMs, gradeOut, gradeBack }) {
+  let lo = 1, hi = 2000;
+  for (let i = 0; i < 40; i++) {
+    const mid = (lo + hi) / 2;
+    let vOut, vBack;
+    if (fixedLeg === "out") {
+      vOut = solveSpeedFromPower({ ...physics, power: fixedPower, vhwMs: vhwOutMs, gradePct: gradeOut });
+      vBack = solveSpeedFromPower({ ...physics, power: mid, vhwMs: vhwBackMs, gradePct: gradeBack });
+    } else {
+      vOut = solveSpeedFromPower({ ...physics, power: mid, vhwMs: vhwOutMs, gradePct: gradeOut });
+      vBack = solveSpeedFromPower({ ...physics, power: fixedPower, vhwMs: vhwBackMs, gradePct: gradeBack });
+    }
+    const pOutW = fixedLeg === "out" ? fixedPower : mid;
+    const pBackW = fixedLeg === "out" ? mid : fixedPower;
+    const actualAvg = (pOutW / vOut + pBackW / vBack) / (1 / vOut + 1 / vBack);
+    if (actualAvg < targetAvg) lo = mid;
+    else hi = mid;
+  }
+  return (lo + hi) / 2;
+}
+
 export default function OutAndBackCalculator({ commitSha }) {
-  const [mode, setMode] = useState("forward");
+  const [mode, setMode] = useState("power");
 
   const [baseSpeed, setBaseSpeed] = useState(45);
   const [distance, setDistance] = useState(14.10);
@@ -38,12 +59,16 @@ export default function OutAndBackCalculator({ commitSha }) {
   const [vOut, setVOut] = useState(36);
   const [vBack, setVBack] = useState(50);
 
-  const [powerOut, setPowerOut] = useState(250);
-  const [powerBack, setPowerBack] = useState(250);
-  const [cda, setCda] = useState(0.22);
-  const [mass, setMass] = useState(75);
-  const [windKph, setWindKph] = useState(15);
-  const [windAngle, setWindAngle] = useState(0);
+  const [powerOut, setPowerOut] = useState(298);
+  const [powerBack, setPowerBack] = useState(319);
+  const [powerAvg, setPowerAvg] = useState(305);
+  const [autoPowerSlider, setAutoPowerSlider] = useState("back");
+  const [cda, setCda] = useState(0.255);
+  const [riderMass, setRiderMass] = useState(70);
+  const [bikeMass, setBikeMass] = useState(9);
+  const [windKph, setWindKph] = useState(23);
+  const [windAngle, setWindAngle] = useState(12);
+  const [courseHeading, setCourseHeading] = useState(315);
   const [grade, setGrade] = useState(0);
   const [crr, setCrr] = useState(0.004);
   const [lossDt, setLossDt] = useState(2);
@@ -68,15 +93,38 @@ export default function OutAndBackCalculator({ commitSha }) {
   const rTAct = (distance / rAvg) * 60;
   const rDt = (rTAct - rTBase) * 60;
 
-  const windAngleRad = (windAngle * Math.PI) / 180;
-  const windParallelKph = windKph * Math.cos(windAngleRad);
-  const windCrossKph = Math.abs(windKph * Math.sin(windAngleRad));
+  const totalMass = riderMass + bikeMass;
+  const relAngleRad = ((windAngle - courseHeading) * Math.PI) / 180;
+  const windParallelKph = windKph * Math.cos(relAngleRad);
+  const windCrossKph = Math.abs(windKph * Math.sin(relAngleRad));
   const windParallelMs = windParallelKph / 3.6;
-  const physicsBase = { cda, mass, crr, lossDtPct: lossDt, rho, draft };
-  const pOutMs = solveSpeedFromPower({ ...physicsBase, power: powerOut, vhwMs: +windParallelMs, gradePct: +grade });
-  const pBackMs = solveSpeedFromPower({ ...physicsBase, power: powerBack, vhwMs: -windParallelMs, gradePct: -grade });
-  const pIdealOutMs = solveSpeedFromPower({ ...physicsBase, power: powerOut, vhwMs: 0, gradePct: 0 });
-  const pIdealBackMs = solveSpeedFromPower({ ...physicsBase, power: powerBack, vhwMs: 0, gradePct: 0 });
+
+  const physicsBase = { cda, mass: totalMass, crr, lossDtPct: lossDt, rho, draft };
+  const vhwOutMs = +windParallelMs;
+  const vhwBackMs = -windParallelMs;
+  const gradeOut = +grade;
+  const gradeBack = -grade;
+
+  let displayedOut = powerOut;
+  let displayedBack = powerBack;
+  let displayedAvg = powerAvg;
+
+  if (autoPowerSlider === "out") {
+    displayedOut = findPowerForAvg({
+      targetAvg: powerAvg, fixedPower: powerBack, fixedLeg: "back",
+      physics: physicsBase, vhwOutMs, vhwBackMs, gradeOut, gradeBack,
+    });
+  } else if (autoPowerSlider === "back") {
+    displayedBack = findPowerForAvg({
+      targetAvg: powerAvg, fixedPower: powerOut, fixedLeg: "out",
+      physics: physicsBase, vhwOutMs, vhwBackMs, gradeOut, gradeBack,
+    });
+  }
+
+  const pOutMs = solveSpeedFromPower({ ...physicsBase, power: displayedOut, vhwMs: vhwOutMs, gradePct: gradeOut });
+  const pBackMs = solveSpeedFromPower({ ...physicsBase, power: displayedBack, vhwMs: vhwBackMs, gradePct: gradeBack });
+  const pIdealOutMs = solveSpeedFromPower({ ...physicsBase, power: displayedOut, vhwMs: 0, gradePct: 0 });
+  const pIdealBackMs = solveSpeedFromPower({ ...physicsBase, power: displayedBack, vhwMs: 0, gradePct: 0 });
   const pOut = pOutMs * 3.6;
   const pBack = pBackMs * 3.6;
   const pIdealOut = pIdealOutMs * 3.6;
@@ -87,9 +135,10 @@ export default function OutAndBackCalculator({ commitSha }) {
   const pTBase = (distance / pIdealAvg) * 60;
   const pTAct = (distance / pAvg) * 60;
   const pDt = (pTAct - pTBase) * 60;
-  const pAvgPower =
-    (powerOut / pOut + powerBack / pBack) /
-    (1 / pOut + 1 / pBack);
+
+  if (autoPowerSlider === "avg") {
+    displayedAvg = (displayedOut / pOut + displayedBack / pBack) / (1 / pOut + 1 / pBack);
+  }
 
   const isReverse = mode === "reverse";
   const isPower = mode === "power";
@@ -113,6 +162,279 @@ export default function OutAndBackCalculator({ commitSha }) {
   };
 
   const sliderPct = (deltaV / 15) * 100;
+
+  function handleAutoChange(newTarget) {
+    if (autoPowerSlider === "out") setPowerOut(Math.round(displayedOut));
+    else if (autoPowerSlider === "back") setPowerBack(Math.round(displayedBack));
+    else if (autoPowerSlider === "avg") setPowerAvg(Math.round(displayedAvg));
+    setAutoPowerSlider(newTarget);
+  }
+
+  const penaltyCard = (
+    <Card className="mb-4">
+      <div className="flex items-baseline justify-between">
+        <Eyebrow>
+          {isPower ? "Penalty vs flat & calm" : isReverse ? "vs no-wind potential" : "Penalty vs ideal"}
+        </Eyebrow>
+        <Num className="text-[11px] text-zinc-500">
+          {isPower ? "no-wind" : "base"} @ {data.base.toFixed(2)} kph
+        </Num>
+      </div>
+
+      <div className="mt-5 grid grid-cols-2 gap-6 sm:gap-10">
+        <div>
+          <div className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider text-emerald-700">
+            <Clock className="h-3 w-3" strokeWidth={2.5} /> Ideal
+          </div>
+          <Num className="mt-2 block text-4xl font-bold tracking-tight text-emerald-700 sm:text-5xl">
+            {formatTime(data.tBase)}
+          </Num>
+          <Num className="mt-1.5 block text-xs text-zinc-500">
+            {data.base.toFixed(2)} kph
+          </Num>
+        </div>
+        <div>
+          <div className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider text-rose-700">
+            <Wind className="h-3 w-3" strokeWidth={2.5} /> Actual
+          </div>
+          <Num className="mt-2 block text-4xl font-bold tracking-tight text-rose-700 sm:text-5xl">
+            {formatTime(data.tAct)}
+          </Num>
+          <Num className="mt-1.5 block text-xs text-zinc-500">
+            {data.vAvg.toFixed(2)} kph avg
+          </Num>
+        </div>
+      </div>
+
+      <Separator />
+
+      <div className="grid grid-cols-2 gap-3">
+        <PenaltyBlock
+          icon={<Gauge className="h-3 w-3" strokeWidth={2.5} />}
+          label="Speed loss"
+          value={`−${data.dvAvg.toFixed(2)}`}
+          unit="kph"
+        />
+        <PenaltyBlock
+          icon={<Clock className="h-3 w-3" strokeWidth={2.5} />}
+          label="Time loss"
+          value={`+${data.dt.toFixed(1)}`}
+          unit="sec"
+        />
+      </div>
+    </Card>
+  );
+
+  const courseCard = (
+    <Card className="mb-4">
+      <div className="flex items-baseline justify-between">
+        <Eyebrow>Course profile</Eyebrow>
+        <Num className="text-[11px] text-zinc-500">
+          {distance.toFixed(2)} km · turn at {(distance / 2).toFixed(2)}
+        </Num>
+      </div>
+
+      <div className="relative mt-4">
+        <div className="flex h-9 overflow-hidden rounded-lg border border-zinc-200">
+          <div className="flex flex-1 items-center justify-between border-r border-zinc-200 bg-zinc-50 px-3">
+            <ArrowRight className="h-3.5 w-3.5 text-zinc-700" strokeWidth={2.5} />
+            <Num className="text-xs font-semibold text-zinc-900">
+              {data.vOut.toFixed(1)} kph
+            </Num>
+          </div>
+          <div className="flex flex-1 items-center justify-between bg-emerald-50 px-3">
+            <Num className="text-xs font-semibold text-emerald-900">
+              {data.vBack.toFixed(1)} kph
+            </Num>
+            <ArrowRight className="h-3.5 w-3.5 rotate-180 text-emerald-700" strokeWidth={2.5} />
+          </div>
+        </div>
+        <div className="mono mt-1.5 flex justify-between text-[10px] uppercase tracking-wider text-zinc-500">
+          <span>start</span>
+          <span className="absolute left-1/2 -translate-x-1/2">turn</span>
+          <span>finish</span>
+        </div>
+      </div>
+    </Card>
+  );
+
+  const inputsCard = (
+    <Card className="mb-8">
+      <Eyebrow>
+        {isPower ? "Power model inputs" : isReverse ? "Observed leg speeds" : "Forward inputs"}
+      </Eyebrow>
+      <div className="mt-4">
+        {mode === "forward" && (
+          <div className="space-y-5">
+            <div className="grid grid-cols-2 gap-3">
+              <NumberInput label="Base speed" value={baseSpeed} onChange={setBaseSpeed} unit="kph" step={0.5} />
+              <NumberInput label="Distance" value={distance} onChange={setDistance} unit="km" step={0.1} />
+            </div>
+            <div>
+              <div className="mb-2 flex items-baseline justify-between">
+                <label className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+                  Δv per leg
+                </label>
+                <Num className="text-sm">
+                  <span className="font-semibold text-zinc-950">±{deltaV.toFixed(1)}</span>
+                  <span className="ml-1 text-zinc-400">kph</span>
+                </Num>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="15"
+                step="0.5"
+                value={deltaV}
+                onChange={(e) => setDeltaV(parseFloat(e.target.value))}
+                className="slider-thumb h-2 w-full cursor-pointer rounded-full"
+                style={{
+                  background: `linear-gradient(to right, #18181b 0%, #18181b ${sliderPct}%, #e4e4e7 ${sliderPct}%, #e4e4e7 100%)`,
+                }}
+              />
+              <div className="mono mt-1.5 flex justify-between text-[10px] text-zinc-400">
+                <span>0</span>
+                <span>5</span>
+                <span>10</span>
+                <span>15</span>
+              </div>
+            </div>
+          </div>
+        )}
+        {mode === "reverse" && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <NumberInput label="Out leg" value={vOut} onChange={setVOut} unit="kph" step={0.5} />
+              <NumberInput label="Back leg" value={vBack} onChange={setVBack} unit="kph" step={0.5} />
+            </div>
+            <NumberInput label="Total distance" value={distance} onChange={setDistance} unit="km" step={0.1} />
+            <div className="flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-emerald-800">
+                Implied no-wind speed
+              </span>
+              <Num className="text-base font-semibold text-emerald-900">
+                {rBase.toFixed(2)} <span className="text-xs font-normal text-emerald-700">kph</span>
+              </Num>
+            </div>
+          </div>
+        )}
+        {mode === "power" && (
+          <div className="space-y-5">
+            <div className="space-y-3 rounded-lg border border-zinc-200 bg-zinc-50/60 p-3">
+              <div className="flex items-center justify-between">
+                <Eyebrow>Power · auto-compute</Eyebrow>
+                <div className="flex gap-0.5 rounded-md bg-zinc-200/70 p-0.5">
+                  <ToggleBtn active={autoPowerSlider === "out"} onClick={() => handleAutoChange("out")}>Out</ToggleBtn>
+                  <ToggleBtn active={autoPowerSlider === "back"} onClick={() => handleAutoChange("back")}>Back</ToggleBtn>
+                  <ToggleBtn active={autoPowerSlider === "avg"} onClick={() => handleAutoChange("avg")}>Avg</ToggleBtn>
+                </div>
+              </div>
+              <SliderInput
+                label="Avg power"
+                value={autoPowerSlider === "avg" ? Math.round(displayedAvg) : powerAvg}
+                onChange={setPowerAvg}
+                min={100} max={500} step={5} unit="W"
+                disabled={autoPowerSlider === "avg"}
+              />
+              <SliderInput
+                label="Out leg power"
+                value={autoPowerSlider === "out" ? Math.round(displayedOut) : powerOut}
+                onChange={setPowerOut}
+                min={100} max={500} step={5} unit="W"
+                disabled={autoPowerSlider === "out"}
+              />
+              <SliderInput
+                label="Back leg power"
+                value={autoPowerSlider === "back" ? Math.round(displayedBack) : powerBack}
+                onChange={setPowerBack}
+                min={100} max={500} step={5} unit="W"
+                disabled={autoPowerSlider === "back"}
+              />
+            </div>
+
+            <div className="space-y-3 rounded-lg border border-zinc-200 bg-zinc-50/60 p-3">
+              <Eyebrow>Course & wind</Eyebrow>
+              <SliderInput label="Course heading (out)" value={courseHeading} onChange={setCourseHeading} min={0} max={360} step={5} unit="°" />
+              <SliderInput label="Wind speed" value={windKph} onChange={setWindKph} min={0} max={50} step={0.5} unit="kph" />
+              <SliderInput label="Wind from" value={windAngle} onChange={setWindAngle} min={0} max={360} step={5} unit="°" />
+              <div className="flex items-center gap-3 pt-1">
+                <WindCompass courseHeadingDeg={courseHeading} windAngleDeg={windAngle} hasWind={windKph > 0.05} />
+                <div className="mono flex-1 space-y-1 text-[11px]">
+                  <div className="flex justify-between">
+                    <span className="text-zinc-500">Out leg</span>
+                    <span className="text-zinc-900">
+                      {Math.abs(windParallelKph) < 0.05
+                        ? "—"
+                        : (windParallelKph > 0 ? "−" : "+") +
+                          Math.abs(windParallelKph).toFixed(1) +
+                          " kph"}
+                      <span className="ml-1 text-zinc-400">
+                        {Math.abs(windParallelKph) < 0.05 ? "" : windParallelKph > 0 ? "head" : "tail"}
+                      </span>
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-zinc-500">Back leg</span>
+                    <span className="text-zinc-900">
+                      {Math.abs(windParallelKph) < 0.05
+                        ? "—"
+                        : (windParallelKph > 0 ? "+" : "−") +
+                          Math.abs(windParallelKph).toFixed(1) +
+                          " kph"}
+                      <span className="ml-1 text-zinc-400">
+                        {Math.abs(windParallelKph) < 0.05 ? "" : windParallelKph > 0 ? "tail" : "head"}
+                      </span>
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-zinc-500">Crosswind</span>
+                    <span className="text-zinc-900">{windCrossKph.toFixed(1)} kph</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <NumberInput label="CdA" value={cda} onChange={setCda} unit="m²" step={0.005} />
+              <NumberInput label="Rider mass" value={riderMass} onChange={setRiderMass} unit="kg" step={0.5} />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <NumberInput label="Distance" value={distance} onChange={setDistance} unit="km" step={0.1} />
+              <NumberInput label="Grade (out)" value={grade} onChange={setGrade} unit="%" step={0.1} />
+            </div>
+            <button
+              type="button"
+              onClick={() => setAdvancedOpen((o) => !o)}
+              className="flex w-full items-center justify-between rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-600 transition hover:border-zinc-300 hover:text-zinc-900"
+            >
+              <span>Advanced</span>
+              <ChevronDown
+                className={"h-3.5 w-3.5 transition-transform " + (advancedOpen ? "rotate-180" : "")}
+                strokeWidth={2.5}
+              />
+            </button>
+            {advancedOpen && (
+              <div className="grid grid-cols-2 gap-3">
+                <NumberInput label="Bike mass" value={bikeMass} onChange={setBikeMass} unit="kg" step={0.1} />
+                <NumberInput label="Crr" value={crr} onChange={setCrr} unit="" step={0.0005} />
+                <NumberInput label="Drivetrain loss" value={lossDt} onChange={setLossDt} unit="%" step={0.5} />
+                <NumberInput label="Air density" value={rho} onChange={setRho} unit="kg/m³" step={0.005} />
+                <NumberInput label="Draft factor" value={draft} onChange={setDraft} unit="" step={0.05} />
+              </div>
+            )}
+            <div className="flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-emerald-800">
+                No-wind, flat avg
+              </span>
+              <Num className="text-base font-semibold text-emerald-900">
+                {pIdealAvg.toFixed(2)} <span className="text-xs font-normal text-emerald-700">kph</span>
+              </Num>
+            </div>
+          </div>
+        )}
+      </div>
+    </Card>
+  );
 
   return (
     <div
@@ -146,6 +468,8 @@ export default function OutAndBackCalculator({ commitSha }) {
           cursor: pointer;
           box-shadow: 0 1px 4px rgba(24,24,27,0.2);
         }
+        .slider-thumb:disabled::-webkit-slider-thumb { border-color: #a1a1aa; cursor: not-allowed; }
+        .slider-thumb:disabled::-moz-range-thumb { border-color: #a1a1aa; cursor: not-allowed; }
         input[type="number"]::-webkit-outer-spin-button,
         input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
         input[type="number"] { -moz-appearance: textfield; }
@@ -171,262 +495,31 @@ export default function OutAndBackCalculator({ commitSha }) {
         </header>
 
         <div className="mb-5 inline-flex gap-0.5 rounded-xl bg-zinc-200/70 p-1">
+          <ModeTab active={mode === "power"} onClick={() => setMode("power")}>
+            Power
+          </ModeTab>
           <ModeTab active={mode === "forward"} onClick={() => setMode("forward")}>
             Δv
           </ModeTab>
           <ModeTab active={mode === "reverse"} onClick={() => setMode("reverse")}>
             Splits
           </ModeTab>
-          <ModeTab active={mode === "power"} onClick={() => setMode("power")}>
-            Power
-          </ModeTab>
         </div>
 
-        <Card className="mb-4">
-          <Eyebrow>
-            {isPower ? "Power model inputs" : isReverse ? "Observed leg speeds" : "Forward inputs"}
-          </Eyebrow>
-          <div className="mt-4">
-            {mode === "forward" && (
-              <div className="space-y-5">
-                <div className="grid grid-cols-2 gap-3">
-                  <NumberInput label="Base speed" value={baseSpeed} onChange={setBaseSpeed} unit="kph" step={0.5} />
-                  <NumberInput label="Distance" value={distance} onChange={setDistance} unit="km" step={0.1} />
-                </div>
-                <div>
-                  <div className="mb-2 flex items-baseline justify-between">
-                    <label className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
-                      Δv per leg
-                    </label>
-                    <Num className="text-sm">
-                      <span className="font-semibold text-zinc-950">±{deltaV.toFixed(1)}</span>
-                      <span className="ml-1 text-zinc-400">kph</span>
-                    </Num>
-                  </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="15"
-                    step="0.5"
-                    value={deltaV}
-                    onChange={(e) => setDeltaV(parseFloat(e.target.value))}
-                    className="slider-thumb h-2 w-full cursor-pointer rounded-full"
-                    style={{
-                      background: `linear-gradient(to right, #18181b 0%, #18181b ${sliderPct}%, #e4e4e7 ${sliderPct}%, #e4e4e7 100%)`,
-                    }}
-                  />
-                  <div className="mono mt-1.5 flex justify-between text-[10px] text-zinc-400">
-                    <span>0</span>
-                    <span>5</span>
-                    <span>10</span>
-                    <span>15</span>
-                  </div>
-                </div>
-              </div>
-            )}
-            {mode === "reverse" && (
-              <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-3">
-                  <NumberInput label="Out leg" value={vOut} onChange={setVOut} unit="kph" step={0.5} />
-                  <NumberInput label="Back leg" value={vBack} onChange={setVBack} unit="kph" step={0.5} />
-                </div>
-                <NumberInput label="Total distance" value={distance} onChange={setDistance} unit="km" step={0.1} />
-                <div className="flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5">
-                  <span className="text-[11px] font-semibold uppercase tracking-wider text-emerald-800">
-                    Implied no-wind speed
-                  </span>
-                  <Num className="text-base font-semibold text-emerald-900">
-                    {rBase.toFixed(2)} <span className="text-xs font-normal text-emerald-700">kph</span>
-                  </Num>
-                </div>
-              </div>
-            )}
-            {mode === "power" && (
-              <div className="space-y-5">
-                <div className="flex items-center justify-between rounded-lg bg-zinc-100 px-3 py-2.5">
-                  <span className="text-[11px] font-semibold uppercase tracking-wider text-zinc-600">
-                    Avg power · event
-                  </span>
-                  <Num className="text-base font-semibold text-zinc-950">
-                    {Math.round(pAvgPower)}
-                    <span className="ml-1 text-xs font-normal text-zinc-500">W</span>
-                  </Num>
-                </div>
-                <SliderInput label="Out leg power" value={powerOut} onChange={setPowerOut} min={100} max={500} step={5} unit="W" />
-                <SliderInput label="Back leg power" value={powerBack} onChange={setPowerBack} min={100} max={500} step={5} unit="W" />
-
-                <div className="space-y-3 rounded-lg border border-zinc-200 bg-zinc-50/60 p-3">
-                  <Eyebrow>Wind</Eyebrow>
-                  <SliderInput label="Speed" value={windKph} onChange={setWindKph} min={0} max={40} step={0.5} unit="kph" />
-                  <SliderInput label="Direction" value={windAngle} onChange={setWindAngle} min={0} max={360} step={5} unit="°" />
-                  <div className="flex items-center gap-3 pt-1">
-                    <WindCompass angleDeg={windAngle} hasWind={windKph > 0.05} />
-                    <div className="mono flex-1 space-y-1 text-[11px]">
-                      <div className="flex justify-between">
-                        <span className="text-zinc-500">Out leg</span>
-                        <span className="text-zinc-900">
-                          {Math.abs(windParallelKph) < 0.05
-                            ? "—"
-                            : (windParallelKph > 0 ? "−" : "+") +
-                              Math.abs(windParallelKph).toFixed(1) +
-                              " kph"}
-                          <span className="ml-1 text-zinc-400">
-                            {Math.abs(windParallelKph) < 0.05 ? "" : windParallelKph > 0 ? "head" : "tail"}
-                          </span>
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-zinc-500">Back leg</span>
-                        <span className="text-zinc-900">
-                          {Math.abs(windParallelKph) < 0.05
-                            ? "—"
-                            : (windParallelKph > 0 ? "+" : "−") +
-                              Math.abs(windParallelKph).toFixed(1) +
-                              " kph"}
-                          <span className="ml-1 text-zinc-400">
-                            {Math.abs(windParallelKph) < 0.05 ? "" : windParallelKph > 0 ? "tail" : "head"}
-                          </span>
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-zinc-500">Crosswind</span>
-                        <span className="text-zinc-900">{windCrossKph.toFixed(1)} kph</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <NumberInput label="CdA" value={cda} onChange={setCda} unit="m²" step={0.005} />
-                  <NumberInput label="Total mass" value={mass} onChange={setMass} unit="kg" step={0.5} />
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <NumberInput label="Distance" value={distance} onChange={setDistance} unit="km" step={0.1} />
-                  <NumberInput label="Grade (out)" value={grade} onChange={setGrade} unit="%" step={0.1} />
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setAdvancedOpen((o) => !o)}
-                  className="flex w-full items-center justify-between rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-600 transition hover:border-zinc-300 hover:text-zinc-900"
-                >
-                  <span>Advanced</span>
-                  <ChevronDown
-                    className={"h-3.5 w-3.5 transition-transform " + (advancedOpen ? "rotate-180" : "")}
-                    strokeWidth={2.5}
-                  />
-                </button>
-                {advancedOpen && (
-                  <div className="grid grid-cols-2 gap-3">
-                    <NumberInput label="Crr" value={crr} onChange={setCrr} unit="" step={0.0005} />
-                    <NumberInput label="Drivetrain loss" value={lossDt} onChange={setLossDt} unit="%" step={0.5} />
-                    <NumberInput label="Air density" value={rho} onChange={setRho} unit="kg/m³" step={0.005} />
-                    <NumberInput label="Draft factor" value={draft} onChange={setDraft} unit="" step={0.05} />
-                  </div>
-                )}
-                <div className="flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5">
-                  <span className="text-[11px] font-semibold uppercase tracking-wider text-emerald-800">
-                    No-wind, flat avg
-                  </span>
-                  <Num className="text-base font-semibold text-emerald-900">
-                    {pIdealAvg.toFixed(2)} <span className="text-xs font-normal text-emerald-700">kph</span>
-                  </Num>
-                </div>
-              </div>
-            )}
-          </div>
-        </Card>
-
-        <Card className="mb-4">
-          <div className="flex items-baseline justify-between">
-            <Eyebrow>Course profile</Eyebrow>
-            <Num className="text-[11px] text-zinc-500">
-              {distance.toFixed(2)} km · turn at {(distance / 2).toFixed(2)}
-            </Num>
-          </div>
-
-          <div className="relative mt-4">
-            <div className="flex h-9 overflow-hidden rounded-lg border border-zinc-200">
-              <div className="flex flex-1 items-center justify-between border-r border-zinc-200 bg-zinc-50 px-3">
-                <ArrowRight className="h-3.5 w-3.5 text-zinc-700" strokeWidth={2.5} />
-                <Num className="text-xs font-semibold text-zinc-900">
-                  {data.vOut.toFixed(1)} kph
-                </Num>
-              </div>
-              <div className="flex flex-1 items-center justify-between bg-emerald-50 px-3">
-                <Num className="text-xs font-semibold text-emerald-900">
-                  {data.vBack.toFixed(1)} kph
-                </Num>
-                <ArrowRight className="h-3.5 w-3.5 rotate-180 text-emerald-700" strokeWidth={2.5} />
-              </div>
-            </div>
-            <div className="mono mt-1.5 flex justify-between text-[10px] uppercase tracking-wider text-zinc-500">
-              <span>start</span>
-              <span className="absolute left-1/2 -translate-x-1/2">turn</span>
-              <span>finish</span>
-            </div>
-          </div>
-        </Card>
-
-        <Card className="mb-8">
-          <div className="flex items-baseline justify-between">
-            <Eyebrow>
-              {isPower ? "Penalty vs flat & calm" : isReverse ? "vs no-wind potential" : "Penalty vs ideal"}
-            </Eyebrow>
-            <Num className="text-[11px] text-zinc-500">
-              {isPower ? "no-wind" : "base"} @ {data.base.toFixed(2)} kph
-            </Num>
-          </div>
-
-          <div className="mt-5 grid grid-cols-2 gap-6 sm:gap-10">
-            <div>
-              <div className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider text-emerald-700">
-                <Clock className="h-3 w-3" strokeWidth={2.5} /> Ideal
-              </div>
-              <Num className="mt-2 block text-4xl font-bold tracking-tight text-emerald-700 sm:text-5xl">
-                {formatTime(data.tBase)}
-              </Num>
-              <Num className="mt-1.5 block text-xs text-zinc-500">
-                {data.base.toFixed(2)} kph
-              </Num>
-            </div>
-            <div>
-              <div className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider text-rose-700">
-                <Wind className="h-3 w-3" strokeWidth={2.5} /> Actual
-              </div>
-              <Num className="mt-2 block text-4xl font-bold tracking-tight text-rose-700 sm:text-5xl">
-                {formatTime(data.tAct)}
-              </Num>
-              <Num className="mt-1.5 block text-xs text-zinc-500">
-                {data.vAvg.toFixed(2)} kph avg
-              </Num>
-            </div>
-          </div>
-
-          <Separator />
-
-          <div className="grid grid-cols-2 gap-3">
-            <PenaltyBlock
-              icon={<Gauge className="h-3 w-3" strokeWidth={2.5} />}
-              label="Speed loss"
-              value={`−${data.dvAvg.toFixed(2)}`}
-              unit="kph"
-            />
-            <PenaltyBlock
-              icon={<Clock className="h-3 w-3" strokeWidth={2.5} />}
-              label="Time loss"
-              value={`+${data.dt.toFixed(1)}`}
-              unit="sec"
-            />
-          </div>
-        </Card>
+        {penaltyCard}
+        {courseCard}
+        {inputsCard}
 
         {isPower ? (
           <>
             <p className="mono px-1 text-[11px] leading-relaxed text-zinc-500">
-              P·η = ½·ρ·CdA·draft·(v+v_w)²·v + m·g·(Crr·cosθ + sinθ)·v
+              P·η = ½·ρ·CdA·draft·(v + v_w)²·v + (m_r + m_b)·g·(Crr·cosθ + sinθ)·v
+            </p>
+            <p className="mt-1.5 px-1 text-[11px] leading-relaxed text-zinc-400">
+              v, v_w in m/s (UI inputs in kph are divided by 3.6 internally) · θ = atan(grade)
             </p>
             <p className="mt-2 px-1 text-xs leading-relaxed text-zinc-500">
-              At fixed power, headwind costs more time than the equivalent tailwind saves — aero drag scales with apparent-wind squared. Wind direction is decomposed into a parallel (head/tail) and crosswind component; only the parallel piece changes apparent wind here.
+              At fixed power, headwind costs more time than the equivalent tailwind saves — aero drag scales with apparent-wind squared. Wind direction is decomposed into a parallel (head/tail) and crosswind component using your course heading; only the parallel piece changes apparent wind here.
             </p>
             <p className="mt-2 px-1 text-[11px] leading-relaxed text-zinc-500">
               Power model adapted from{" "}
@@ -502,6 +595,22 @@ function ModeTab({ active, onClick, children }) {
   );
 }
 
+function ToggleBtn({ active, onClick, children }) {
+  return (
+    <button
+      onClick={onClick}
+      className={
+        "rounded px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider transition-all " +
+        (active
+          ? "bg-white text-zinc-950 shadow-sm"
+          : "text-zinc-600 hover:text-zinc-950")
+      }
+    >
+      {children}
+    </button>
+  );
+}
+
 function NumberInput({ label, value, onChange, unit, step }) {
   return (
     <div>
@@ -527,13 +636,18 @@ function NumberInput({ label, value, onChange, unit, step }) {
   );
 }
 
-function SliderInput({ label, value, onChange, min, max, step, unit }) {
+function SliderInput({ label, value, onChange, min, max, step, unit, disabled = false }) {
   const pct = max === min ? 0 : ((value - min) / (max - min)) * 100;
   const clampedPct = Math.max(0, Math.min(100, pct));
   return (
-    <div>
-      <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+    <div className={disabled ? "opacity-70" : ""}>
+      <label className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
         {label}
+        {disabled && (
+          <span className="rounded bg-zinc-200 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wider text-zinc-600">
+            auto
+          </span>
+        )}
       </label>
       <div className="flex items-center gap-3">
         <input
@@ -542,10 +656,16 @@ function SliderInput({ label, value, onChange, min, max, step, unit }) {
           max={max}
           step={step}
           value={value}
+          disabled={disabled}
           onChange={(e) => onChange(parseFloat(e.target.value))}
-          className="slider-thumb h-2 flex-1 cursor-pointer rounded-full"
+          className={
+            "slider-thumb h-2 flex-1 rounded-full " +
+            (disabled ? "cursor-not-allowed" : "cursor-pointer")
+          }
           style={{
-            background: `linear-gradient(to right, #18181b 0%, #18181b ${clampedPct}%, #e4e4e7 ${clampedPct}%, #e4e4e7 100%)`,
+            background: disabled
+              ? `linear-gradient(to right, #a1a1aa 0%, #a1a1aa ${clampedPct}%, #e4e4e7 ${clampedPct}%, #e4e4e7 100%)`
+              : `linear-gradient(to right, #18181b 0%, #18181b ${clampedPct}%, #e4e4e7 ${clampedPct}%, #e4e4e7 100%)`,
           }}
         />
         <div className="flex items-center gap-1.5">
@@ -553,11 +673,18 @@ function SliderInput({ label, value, onChange, min, max, step, unit }) {
             type="number"
             value={value}
             step={step}
+            disabled={disabled}
+            readOnly={disabled}
             onChange={(e) => {
               const v = parseFloat(e.target.value);
               if (!isNaN(v)) onChange(v);
             }}
-            className="mono w-20 rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-sm font-medium text-zinc-950 transition-all hover:border-zinc-300 focus:border-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-900/15"
+            className={
+              "mono w-20 rounded-lg border px-2 py-1.5 text-sm font-medium transition-all focus:outline-none focus:ring-2 focus:ring-zinc-900/15 " +
+              (disabled
+                ? "border-zinc-200 bg-zinc-100 text-zinc-500"
+                : "border-zinc-200 bg-white text-zinc-950 hover:border-zinc-300 focus:border-zinc-900")
+            }
           />
           {unit && (
             <span className="mono whitespace-nowrap text-[11px] text-zinc-400">
@@ -570,47 +697,58 @@ function SliderInput({ label, value, onChange, min, max, step, unit }) {
   );
 }
 
-function WindCompass({ angleDeg, hasWind }) {
-  const cx = 40, cy = 40, r = 28;
-  const rad = (angleDeg * Math.PI) / 180;
-  const sx = cx + r * Math.sin(rad);
-  const sy = cy - r * Math.cos(rad);
-  const innerR = 6;
-  const tx = cx - innerR * Math.sin(rad);
-  const ty = cy + innerR * Math.cos(rad);
+function WindCompass({ courseHeadingDeg, windAngleDeg, hasWind }) {
+  const cx = 50, cy = 50, r = 38;
+  const courseRad = (courseHeadingDeg * Math.PI) / 180;
+  const windRad = (windAngleDeg * Math.PI) / 180;
+
+  const outX = cx + r * Math.sin(courseRad);
+  const outY = cy - r * Math.cos(courseRad);
+  const backX = cx - r * Math.sin(courseRad);
+  const backY = cy + r * Math.cos(courseRad);
+
+  const wsx = cx + r * Math.sin(windRad);
+  const wsy = cy - r * Math.cos(windRad);
+  const innerR = 8;
+  const wtx = cx - innerR * Math.sin(windRad);
+  const wty = cy + innerR * Math.cos(windRad);
+
   return (
-    <svg viewBox="0 0 80 80" className="h-16 w-16 flex-shrink-0">
+    <svg viewBox="0 0 100 100" className="h-20 w-20 flex-shrink-0">
       <defs>
+        <marker id="course-arrow-head" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+          <path d="M0,0 L6,3 L0,6 z" fill="#3f3f46" />
+        </marker>
         <marker id="wind-arrow-head" markerWidth="5" markerHeight="5" refX="4" refY="2.5" orient="auto">
           <path d="M0,0 L5,2.5 L0,5 z" fill="#10b981" />
         </marker>
       </defs>
+
       <circle cx={cx} cy={cy} r={r} fill="white" stroke="#e4e4e7" strokeWidth="1" />
+
+      <line x1={cx} y1={cy - r - 1} x2={cx} y2={cy - r + 3} stroke="#a1a1aa" strokeWidth="1" />
+      <text x={cx} y={cy - r - 4} textAnchor="middle" fontSize="7" fontWeight="700" fill="#a1a1aa" fontFamily="ui-monospace, monospace">
+        N
+      </text>
+
       <line
-        x1={cx}
-        y1={cy - r + 4}
-        x2={cx}
-        y2={cy + r - 4}
-        stroke="#d4d4d8"
-        strokeWidth="0.8"
-        strokeDasharray="2 2"
+        x1={backX}
+        y1={backY}
+        x2={outX}
+        y2={outY}
+        stroke="#3f3f46"
+        strokeWidth="2.5"
+        strokeLinecap="round"
+        markerEnd="url(#course-arrow-head)"
       />
-      <path
-        d={`M${cx},${cy - r + 1} L${cx - 2.5},${cy - r + 5} L${cx + 2.5},${cy - r + 5} Z`}
-        fill="#52525b"
-      />
-      <text x={cx} y={cy - 1} textAnchor="middle" fontSize="6" fontWeight="600" fill="#a1a1aa" fontFamily="ui-monospace, monospace">
-        OUT
-      </text>
-      <text x={cx} y={cy + 7} textAnchor="middle" fontSize="6" fontWeight="600" fill="#a1a1aa" fontFamily="ui-monospace, monospace">
-        BACK
-      </text>
+      <circle cx={backX} cy={backY} r="2" fill="#3f3f46" />
+
       {hasWind && (
         <line
-          x1={sx}
-          y1={sy}
-          x2={tx}
-          y2={ty}
+          x1={wsx}
+          y1={wsy}
+          x2={wtx}
+          y2={wty}
           stroke="#10b981"
           strokeWidth="2.2"
           strokeLinecap="round"
