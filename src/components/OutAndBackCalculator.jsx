@@ -1,5 +1,32 @@
 import { useState } from "react";
-import { Wind, Clock, Gauge, ArrowRight } from "lucide-react";
+import { Wind, Clock, Gauge, ArrowRight, ChevronDown } from "lucide-react";
+
+const G = 9.80665;
+
+function solveSpeedFromPower({ power, cda, mass, vhwMs, gradePct, crr, lossDtPct, rho, draft }) {
+  const eta = 1 - lossDtPct / 100;
+  const Pav = power * eta;
+  const theta = Math.atan(gradePct / 100);
+  const cosT = Math.cos(theta);
+  const sinT = Math.sin(theta);
+  const a = 0.5 * rho * cda * draft;
+  const b = mass * G * (crr * cosT + sinT);
+
+  const f = (v) => a * (v + vhwMs) * (v + vhwMs) * v + b * v - Pav;
+  const fp = (v) => a * (3 * v * v + 4 * vhwMs * v + vhwMs * vhwMs) + b;
+
+  let v = 10;
+  for (let i = 0; i < 100; i++) {
+    const fv = f(v);
+    const dfv = fp(v);
+    if (!isFinite(fv) || !isFinite(dfv) || Math.abs(dfv) < 1e-12) break;
+    let next = v - fv / dfv;
+    if (next < 0.05) next = 0.05;
+    if (Math.abs(next - v) < 1e-8) { v = next; break; }
+    v = next;
+  }
+  return v;
+}
 
 export default function OutAndBackCalculator({ commitSha }) {
   const [mode, setMode] = useState("forward");
@@ -10,6 +37,17 @@ export default function OutAndBackCalculator({ commitSha }) {
 
   const [vOut, setVOut] = useState(36);
   const [vBack, setVBack] = useState(50);
+
+  const [power, setPower] = useState(250);
+  const [cda, setCda] = useState(0.22);
+  const [mass, setMass] = useState(75);
+  const [windKph, setWindKph] = useState(15);
+  const [grade, setGrade] = useState(0);
+  const [crr, setCrr] = useState(0.004);
+  const [lossDt, setLossDt] = useState(2);
+  const [rho, setRho] = useState(1.225);
+  const [draft, setDraft] = useState(1.0);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const fOut = Math.max(0.1, baseSpeed - deltaV);
   const fBack = baseSpeed + deltaV;
@@ -28,10 +66,30 @@ export default function OutAndBackCalculator({ commitSha }) {
   const rTAct = (distance / rAvg) * 60;
   const rDt = (rTAct - rTBase) * 60;
 
+  const windMs = windKph / 3.6;
+  const physicsArgs = { power, cda, mass, crr, lossDtPct: lossDt, rho, draft };
+  const pIdealMs = solveSpeedFromPower({ ...physicsArgs, vhwMs: 0, gradePct: 0 });
+  const pOutMs = solveSpeedFromPower({ ...physicsArgs, vhwMs: +windMs, gradePct: +grade });
+  const pBackMs = solveSpeedFromPower({ ...physicsArgs, vhwMs: -windMs, gradePct: -grade });
+  const pIdeal = pIdealMs * 3.6;
+  const pOut = pOutMs * 3.6;
+  const pBack = pBackMs * 3.6;
+  const pAvg = (2 * pOut * pBack) / (pOut + pBack);
+  const pDvAvg = pIdeal - pAvg;
+  const pTBase = (distance / pIdeal) * 60;
+  const pTAct = (distance / pAvg) * 60;
+  const pDt = (pTAct - pTBase) * 60;
+
   const isReverse = mode === "reverse";
-  const data = isReverse
-    ? { base: rBase, vOut: rOut, vBack: rBack, vAvg: rAvg, dvAvg: rDvAvg, tBase: rTBase, tAct: rTAct, dt: rDt }
-    : { base: baseSpeed, vOut: fOut, vBack: fBack, vAvg: fAvg, dvAvg: fDvAvg, tBase: fTBase, tAct: fTAct, dt: fDt };
+  const isPower = mode === "power";
+  let data;
+  if (isPower) {
+    data = { base: pIdeal, vOut: pOut, vBack: pBack, vAvg: pAvg, dvAvg: pDvAvg, tBase: pTBase, tAct: pTAct, dt: pDt };
+  } else if (isReverse) {
+    data = { base: rBase, vOut: rOut, vBack: rBack, vAvg: rAvg, dvAvg: rDvAvg, tBase: rTBase, tAct: rTAct, dt: rDt };
+  } else {
+    data = { base: baseSpeed, vOut: fOut, vBack: fBack, vAvg: fAvg, dvAvg: fDvAvg, tBase: fTBase, tAct: fTAct, dt: fDt };
+  }
 
   const formatTime = (mins) => {
     if (!isFinite(mins) || mins < 0) return "—:——.—";
@@ -102,18 +160,23 @@ export default function OutAndBackCalculator({ commitSha }) {
         </header>
 
         <div className="mb-5 inline-flex gap-0.5 rounded-xl bg-zinc-200/70 p-1">
-          <ModeTab active={!isReverse} onClick={() => setMode("forward")}>
-            Predict penalty
+          <ModeTab active={mode === "forward"} onClick={() => setMode("forward")}>
+            Δv
           </ModeTab>
-          <ModeTab active={isReverse} onClick={() => setMode("reverse")}>
-            Analyze splits
+          <ModeTab active={mode === "reverse"} onClick={() => setMode("reverse")}>
+            Splits
+          </ModeTab>
+          <ModeTab active={mode === "power"} onClick={() => setMode("power")}>
+            Power
           </ModeTab>
         </div>
 
         <Card className="mb-4">
-          <Eyebrow>{isReverse ? "Observed leg speeds" : "Forward inputs"}</Eyebrow>
+          <Eyebrow>
+            {isPower ? "Power model inputs" : isReverse ? "Observed leg speeds" : "Forward inputs"}
+          </Eyebrow>
           <div className="mt-4">
-            {!isReverse ? (
+            {mode === "forward" && (
               <div className="space-y-5">
                 <div className="grid grid-cols-2 gap-3">
                   <NumberInput label="Base speed" value={baseSpeed} onChange={setBaseSpeed} unit="kph" step={0.5} />
@@ -149,7 +212,8 @@ export default function OutAndBackCalculator({ commitSha }) {
                   </div>
                 </div>
               </div>
-            ) : (
+            )}
+            {mode === "reverse" && (
               <div className="space-y-4">
                 <div className="grid grid-cols-2 gap-3">
                   <NumberInput label="Out leg" value={vOut} onChange={setVOut} unit="kph" step={0.5} />
@@ -162,6 +226,49 @@ export default function OutAndBackCalculator({ commitSha }) {
                   </span>
                   <Num className="text-base font-semibold text-emerald-900">
                     {rBase.toFixed(2)} <span className="text-xs font-normal text-emerald-700">kph</span>
+                  </Num>
+                </div>
+              </div>
+            )}
+            {mode === "power" && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <NumberInput label="Power" value={power} onChange={setPower} unit="W" step={5} />
+                  <NumberInput label="Headwind" value={windKph} onChange={setWindKph} unit="kph" step={0.5} />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <NumberInput label="CdA" value={cda} onChange={setCda} unit="m²" step={0.005} />
+                  <NumberInput label="Total mass" value={mass} onChange={setMass} unit="kg" step={0.5} />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <NumberInput label="Distance" value={distance} onChange={setDistance} unit="km" step={0.1} />
+                  <NumberInput label="Grade (out)" value={grade} onChange={setGrade} unit="%" step={0.1} />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setAdvancedOpen((o) => !o)}
+                  className="flex w-full items-center justify-between rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-600 transition hover:border-zinc-300 hover:text-zinc-900"
+                >
+                  <span>Advanced</span>
+                  <ChevronDown
+                    className={"h-3.5 w-3.5 transition-transform " + (advancedOpen ? "rotate-180" : "")}
+                    strokeWidth={2.5}
+                  />
+                </button>
+                {advancedOpen && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <NumberInput label="Crr" value={crr} onChange={setCrr} unit="" step={0.0005} />
+                    <NumberInput label="Drivetrain loss" value={lossDt} onChange={setLossDt} unit="%" step={0.5} />
+                    <NumberInput label="Air density" value={rho} onChange={setRho} unit="kg/m³" step={0.005} />
+                    <NumberInput label="Draft factor" value={draft} onChange={setDraft} unit="" step={0.05} />
+                  </div>
+                )}
+                <div className="flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5">
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-emerald-800">
+                    No-wind, flat speed
+                  </span>
+                  <Num className="text-base font-semibold text-emerald-900">
+                    {pIdeal.toFixed(2)} <span className="text-xs font-normal text-emerald-700">kph</span>
                   </Num>
                 </div>
               </div>
@@ -202,9 +309,11 @@ export default function OutAndBackCalculator({ commitSha }) {
 
         <Card className="mb-8">
           <div className="flex items-baseline justify-between">
-            <Eyebrow>{isReverse ? "vs no-wind potential" : "Penalty vs ideal"}</Eyebrow>
+            <Eyebrow>
+              {isPower ? "Penalty vs flat & calm" : isReverse ? "vs no-wind potential" : "Penalty vs ideal"}
+            </Eyebrow>
             <Num className="text-[11px] text-zinc-500">
-              base @ {data.base.toFixed(2)} kph
+              {isPower ? "no-wind" : "base"} @ {data.base.toFixed(2)} kph
             </Num>
           </div>
 
@@ -251,12 +360,25 @@ export default function OutAndBackCalculator({ commitSha }) {
           </div>
         </Card>
 
-        <p className="mono px-1 text-[11px] leading-relaxed text-zinc-500">
-          v̄ = 2·v₁·v₂ / (v₁ + v₂) &nbsp;·&nbsp; Δv̄ ≈ Δv² / v_base
-        </p>
-        <p className="mt-2 px-1 text-xs leading-relaxed text-zinc-500">
-          Penalty is quadratic in Δv. ±2 kph barely costs anything; ±10 costs almost a minute on 14 km.
-        </p>
+        {isPower ? (
+          <>
+            <p className="mono px-1 text-[11px] leading-relaxed text-zinc-500">
+              P·η = ½·ρ·CdA·draft·(v+v_w)²·v + m·g·(Crr·cosθ + sinθ)·v
+            </p>
+            <p className="mt-2 px-1 text-xs leading-relaxed text-zinc-500">
+              At fixed power, headwind costs more time than the equivalent tailwind saves — aero drag scales with apparent-wind squared.
+            </p>
+          </>
+        ) : (
+          <>
+            <p className="mono px-1 text-[11px] leading-relaxed text-zinc-500">
+              v̄ = 2·v₁·v₂ / (v₁ + v₂) &nbsp;·&nbsp; Δv̄ ≈ Δv² / v_base
+            </p>
+            <p className="mt-2 px-1 text-xs leading-relaxed text-zinc-500">
+              Penalty is quadratic in Δv. ±2 kph barely costs anything; ±10 costs almost a minute on 14 km.
+            </p>
+          </>
+        )}
 
         <Footer commitSha={commitSha} />
       </div>
