@@ -64,7 +64,7 @@ export default function OutAndBackCalculator({ commitSha }) {
   const [powerAvg, setPowerAvg] = useState(305);
   const [autoPowerSlider, setAutoPowerSlider] = useState("back");
   const [cda, setCda] = useState(0.23);
-  const [riderMass, setRiderMass] = useState(70);
+  const [riderMass, setRiderMass] = useState(75);
   const [bikeMass, setBikeMass] = useState(9);
   const [windKph, setWindKph] = useState(23);
   const [windAngle, setWindAngle] = useState(12);
@@ -123,22 +123,20 @@ export default function OutAndBackCalculator({ commitSha }) {
 
   const pOutMs = solveSpeedFromPower({ ...physicsBase, power: displayedOut, vhwMs: vhwOutMs, gradePct: gradeOut });
   const pBackMs = solveSpeedFromPower({ ...physicsBase, power: displayedBack, vhwMs: vhwBackMs, gradePct: gradeBack });
-  const pIdealOutMs = solveSpeedFromPower({ ...physicsBase, power: displayedOut, vhwMs: 0, gradePct: 0 });
-  const pIdealBackMs = solveSpeedFromPower({ ...physicsBase, power: displayedBack, vhwMs: 0, gradePct: 0 });
   const pOut = pOutMs * 3.6;
   const pBack = pBackMs * 3.6;
-  const pIdealOut = pIdealOutMs * 3.6;
-  const pIdealBack = pIdealBackMs * 3.6;
-  const pIdealAvg = (2 * pIdealOut * pIdealBack) / (pIdealOut + pIdealBack);
+
+  if (autoPowerSlider === "avg") {
+    displayedAvg = (displayedOut / pOut + displayedBack / pBack) / (1 / pOut + 1 / pBack);
+  }
+
+  const pIdealMs = solveSpeedFromPower({ ...physicsBase, power: displayedAvg, vhwMs: 0, gradePct: 0 });
+  const pIdealAvg = pIdealMs * 3.6;
   const pAvg = (2 * pOut * pBack) / (pOut + pBack);
   const pDvAvg = pIdealAvg - pAvg;
   const pTBase = (distance / pIdealAvg) * 60;
   const pTAct = (distance / pAvg) * 60;
   const pDt = (pTAct - pTBase) * 60;
-
-  if (autoPowerSlider === "avg") {
-    displayedAvg = (displayedOut / pOut + displayedBack / pBack) / (1 / pOut + 1 / pBack);
-  }
 
   const isReverse = mode === "reverse";
   const isPower = mode === "power";
@@ -212,13 +210,13 @@ export default function OutAndBackCalculator({ commitSha }) {
         <PenaltyBlock
           icon={<Gauge className="h-3 w-3" strokeWidth={2.5} />}
           label="Speed loss"
-          value={`−${data.dvAvg.toFixed(2)}`}
+          value={(data.dvAvg >= 0 ? "−" : "+") + Math.abs(data.dvAvg).toFixed(2)}
           unit="kph"
         />
         <PenaltyBlock
           icon={<Clock className="h-3 w-3" strokeWidth={2.5} />}
           label="Time loss"
-          value={`+${data.dt.toFixed(1)}`}
+          value={(data.dt >= 0 ? "+" : "−") + Math.abs(data.dt).toFixed(1)}
           unit="sec"
         />
       </div>
