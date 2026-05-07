@@ -87,6 +87,9 @@ export default function OutAndBackCalculator({ commitSha }) {
   const pTBase = (distance / pIdealAvg) * 60;
   const pTAct = (distance / pAvg) * 60;
   const pDt = (pTAct - pTBase) * 60;
+  const pAvgPower =
+    (powerOut / pOut + powerBack / pBack) /
+    (1 / pOut + 1 / pBack);
 
   const isReverse = mode === "reverse";
   const isPower = mode === "power";
@@ -240,6 +243,15 @@ export default function OutAndBackCalculator({ commitSha }) {
             )}
             {mode === "power" && (
               <div className="space-y-5">
+                <div className="flex items-center justify-between rounded-lg bg-zinc-100 px-3 py-2.5">
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-zinc-600">
+                    Avg power · event
+                  </span>
+                  <Num className="text-base font-semibold text-zinc-950">
+                    {Math.round(pAvgPower)}
+                    <span className="ml-1 text-xs font-normal text-zinc-500">W</span>
+                  </Num>
+                </div>
                 <SliderInput label="Out leg power" value={powerOut} onChange={setPowerOut} min={100} max={500} step={5} unit="W" />
                 <SliderInput label="Back leg power" value={powerBack} onChange={setPowerBack} min={100} max={500} step={5} unit="W" />
 
@@ -520,15 +532,9 @@ function SliderInput({ label, value, onChange, min, max, step, unit }) {
   const clampedPct = Math.max(0, Math.min(100, pct));
   return (
     <div>
-      <div className="mb-1.5 flex items-baseline justify-between">
-        <label className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
-          {label}
-        </label>
-        <Num className="text-sm">
-          <span className="font-semibold text-zinc-950">{value}</span>
-          {unit && <span className="ml-1 text-zinc-400">{unit}</span>}
-        </Num>
-      </div>
+      <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+        {label}
+      </label>
       <div className="flex items-center gap-3">
         <input
           type="range"
@@ -542,16 +548,23 @@ function SliderInput({ label, value, onChange, min, max, step, unit }) {
             background: `linear-gradient(to right, #18181b 0%, #18181b ${clampedPct}%, #e4e4e7 ${clampedPct}%, #e4e4e7 100%)`,
           }}
         />
-        <input
-          type="number"
-          value={value}
-          step={step}
-          onChange={(e) => {
-            const v = parseFloat(e.target.value);
-            if (!isNaN(v)) onChange(v);
-          }}
-          className="mono w-20 rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-sm font-medium text-zinc-950 transition-all hover:border-zinc-300 focus:border-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-900/15"
-        />
+        <div className="flex items-center gap-1.5">
+          <input
+            type="number"
+            value={value}
+            step={step}
+            onChange={(e) => {
+              const v = parseFloat(e.target.value);
+              if (!isNaN(v)) onChange(v);
+            }}
+            className="mono w-20 rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-sm font-medium text-zinc-950 transition-all hover:border-zinc-300 focus:border-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-900/15"
+          />
+          {unit && (
+            <span className="mono whitespace-nowrap text-[11px] text-zinc-400">
+              {unit}
+            </span>
+          )}
+        </div>
       </div>
     </div>
   );
