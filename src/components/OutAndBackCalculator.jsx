@@ -46,6 +46,34 @@ function legBackground(parallelHeadKph) {
   return `rgb(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)})`;
 }
 
+function impliedParallelWindKph({ vOutKph, vBackKph, pOut, pBack, physics }) {
+  let lo = -40, hi = 40;
+  for (let i = 0; i < 60; i++) {
+    const vwKph = (lo + hi) / 2;
+    const vwMs = vwKph / 3.6;
+    const predOut = solveSpeedFromPower({ ...physics, power: pOut, vhwMs: +vwMs, gradePct: 0 }) * 3.6;
+    const predBack = solveSpeedFromPower({ ...physics, power: pBack, vhwMs: -vwMs, gradePct: 0 }) * 3.6;
+    const sumErr = (predOut - vOutKph) + (vBackKph - predBack);
+    if (sumErr > 0) lo = vwKph;
+    else hi = vwKph;
+  }
+  return (lo + hi) / 2;
+}
+
+function impliedCdAFromSplits({ vOutKph, vBackKph, pOut, pBack, vhwParallelMs, physics }) {
+  let lo = 0.10, hi = 0.60;
+  for (let i = 0; i < 60; i++) {
+    const cda = (lo + hi) / 2;
+    const predOut = solveSpeedFromPower({ ...physics, cda, power: pOut, vhwMs: +vhwParallelMs, gradePct: 0 }) * 3.6;
+    const predBack = solveSpeedFromPower({ ...physics, cda, power: pBack, vhwMs: -vhwParallelMs, gradePct: 0 }) * 3.6;
+    const avgPred = (predOut + predBack) / 2;
+    const avgAct = (vOutKph + vBackKph) / 2;
+    if (avgPred > avgAct) lo = cda;
+    else hi = cda;
+  }
+  return (lo + hi) / 2;
+}
+
 function findPowerForAvg({ targetAvg, fixedPower, fixedLeg, physics, vhwOutMs, vhwBackMs, gradeOut, gradeBack }) {
   let lo = 1, hi = 2000;
   for (let i = 0; i < 40; i++) {
@@ -93,6 +121,9 @@ export default function OutAndBackCalculator({ commitSha }) {
   const [rho, setRho] = useState(1.225);
   const [draft, setDraft] = useState(1.0);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [compareOpen, setCompareOpen] = useState(false);
+  const [actualVOut, setActualVOut] = useState(36.3);
+  const [actualVBack, setActualVBack] = useState(50.2);
 
   const fOut = Math.max(0.1, baseSpeed - deltaV);
   const fBack = baseSpeed + deltaV;
@@ -452,6 +483,55 @@ export default function OutAndBackCalculator({ commitSha }) {
                 {pIdealAvg.toFixed(2)} <span className="text-xs font-normal text-emerald-700">kph</span>
               </Num>
             </div>
+
+            <button
+              type="button"
+              onClick={() => setCompareOpen((o) => !o)}
+              className="flex w-full items-center justify-between rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-600 transition hover:border-zinc-300 hover:text-zinc-900"
+            >
+              <span>Compare to actual splits</span>
+              <ChevronDown
+                className={"h-3.5 w-3.5 transition-transform " + (compareOpen ? "rotate-180" : "")}
+                strokeWidth={2.5}
+              />
+            </button>
+            {compareOpen && (
+              <div className="space-y-3 rounded-lg border border-zinc-200 bg-zinc-50/60 p-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <NumberInput label="Actual out" value={actualVOut} onChange={setActualVOut} unit="kph" step={0.1} />
+                  <NumberInput label="Actual back" value={actualVBack} onChange={setActualVBack} unit="kph" step={0.1} />
+                </div>
+                <div className="mono space-y-1 text-[11px]">
+                  <div className="flex justify-between">
+                    <span className="text-zinc-500">Predicted</span>
+                    <span className="text-zinc-900">out {pOut.toFixed(1)} · back {pBack.toFixed(1)} kph</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-zinc-500">Δ vs actual</span>
+                    <span className={Math.abs(pOut - actualVOut) + Math.abs(pBack - actualVBack) > 2 ? "text-rose-700" : "text-zinc-900"}>
+                      {(pOut - actualVOut >= 0 ? "+" : "") + (pOut - actualVOut).toFixed(1)} · {(pBack - actualVBack >= 0 ? "+" : "") + (pBack - actualVBack).toFixed(1)} kph
+                    </span>
+                  </div>
+                  <div className="flex justify-between border-t border-zinc-200 pt-1">
+                    <span className="text-zinc-500">Implied ‖ wind</span>
+                    <span className="text-zinc-900">
+                      {impliedParallelWindKph({ vOutKph: actualVOut, vBackKph: actualVBack, pOut: displayedOut, pBack: displayedBack, physics: physicsBase }).toFixed(1)}
+                      <span className="ml-1 text-zinc-400">kph (vs your {windParallelKph.toFixed(1)})</span>
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-zinc-500">Implied CdA</span>
+                    <span className="text-zinc-900">
+                      {impliedCdAFromSplits({ vOutKph: actualVOut, vBackKph: actualVBack, pOut: displayedOut, pBack: displayedBack, vhwParallelMs: windParallelMs, physics: physicsBase }).toFixed(3)}
+                      <span className="ml-1 text-zinc-400">m² (vs your {cda.toFixed(3)})</span>
+                    </span>
+                  </div>
+                </div>
+                <p className="text-[10px] leading-relaxed text-zinc-500">
+                  Implied ‖ wind = parallel headwind that fits your splits, holding CdA fixed. Implied CdA = aero coefficient that fits, holding wind fixed. If both differ from your inputs, your real ride probably had a mix of both effects.
+                </p>
+              </div>
+            )}
           </div>
         )}
       </div>
