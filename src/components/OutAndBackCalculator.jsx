@@ -113,6 +113,7 @@ export default function OutAndBackCalculator({ commitSha }) {
   const [riderMass, setRiderMass] = useState(75);
   const [bikeMass, setBikeMass] = useState(9);
   const [windKph, setWindKph] = useState(23);
+  const [windFactorPct, setWindFactorPct] = useState(70);
   const [windAngle, setWindAngle] = useState(12);
   const [courseHeading, setCourseHeading] = useState(315);
   const [grade, setGrade] = useState(0);
@@ -143,9 +144,11 @@ export default function OutAndBackCalculator({ commitSha }) {
   const rDt = (rTAct - rTBase) * 60;
 
   const totalMass = riderMass + bikeMass;
+  const windFactor = windFactorPct / 100;
+  const effectiveWindKph = windKph * windFactor;
   const relAngleRad = ((windAngle - courseHeading) * Math.PI) / 180;
-  const windParallelKph = windKph * Math.cos(relAngleRad);
-  const windCrossKph = Math.abs(windKph * Math.sin(relAngleRad));
+  const windParallelKph = effectiveWindKph * Math.cos(relAngleRad);
+  const windCrossKph = Math.abs(effectiveWindKph * Math.sin(relAngleRad));
   const windParallelMs = windParallelKph / 3.6;
 
   const physicsBase = { cda, mass: totalMass, crr, lossDtPct: lossDt, rho, draft };
@@ -408,7 +411,8 @@ export default function OutAndBackCalculator({ commitSha }) {
             <div className="space-y-3 rounded-lg border border-zinc-200 bg-zinc-50/60 p-3">
               <Eyebrow>Course & wind</Eyebrow>
               <SliderInput label="Course heading (out)" value={courseHeading} onChange={setCourseHeading} min={0} max={360} step={5} unit="°" />
-              <SliderInput label="Wind speed" value={windKph} onChange={setWindKph} min={0} max={50} step={0.5} unit="kph" />
+              <SliderInput label="Wind speed (reported)" value={windKph} onChange={setWindKph} min={0} max={50} step={0.5} unit="kph" />
+              <SliderInput label="Wind factor" value={windFactorPct} onChange={setWindFactorPct} min={30} max={100} step={5} unit="%" />
               <SliderInput label="Wind from" value={windAngle} onChange={setWindAngle} min={0} max={360} step={5} unit="°" />
               <div className="flex items-center gap-3 pt-1">
                 <WindCompass courseHeadingDeg={courseHeading} windAngleDeg={windAngle} hasWind={windKph > 0.05} />
@@ -443,8 +447,15 @@ export default function OutAndBackCalculator({ commitSha }) {
                     <span className="text-zinc-500">Crosswind</span>
                     <span className="text-zinc-900">{windCrossKph.toFixed(1)} kph</span>
                   </div>
+                  <div className="flex justify-between border-t border-zinc-200 pt-1 text-zinc-400">
+                    <span>Effective</span>
+                    <span>{effectiveWindKph.toFixed(1)} kph ({windKph.toFixed(1)} × {windFactor.toFixed(2)})</span>
+                  </div>
                 </div>
               </div>
+              <p className="text-[10px] leading-relaxed text-zinc-500">
+                Wind speed from weather apps / intervals.icu is measured at ~10 m height. At cyclist height (~1-2 m), wind is typically 60-80% of that due to the boundary layer + terrain. Lower for sheltered courses, higher for open plains.
+              </p>
             </div>
 
             <div className="grid grid-cols-2 gap-3">
