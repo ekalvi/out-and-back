@@ -166,7 +166,7 @@ export default function OutAndBackCalculator({ commitSha }) {
   const [riderMass, setRiderMass] = useState(75);
   const [bikeMass, setBikeMass] = useState(9);
   const [windKph, setWindKph] = useState(23);
-  const [windFactorPct, setWindFactorPct] = useState(70);
+  const [windFactorPct, setWindFactorPct] = useState(50);
   const [windAngle, setWindAngle] = useState(12);
   const [courseHeading, setCourseHeading] = useState(315);
   const [grade, setGrade] = useState(0);
