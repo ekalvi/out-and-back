@@ -347,12 +347,16 @@ function PenaltyBlock({ icon, label, value, unit }) {
   );
 }
 
+const REPO_URL = "https://github.com/ekalvi/out-and-back";
+
 function Footer({ commitSha }) {
+  const isRealSha = commitSha && commitSha !== "dev" && commitSha !== "unknown";
+  const shaHref = isRealSha ? `${REPO_URL}/commit/${commitSha}` : REPO_URL;
   return (
     <footer className="mt-10 border-t border-zinc-200 pt-5">
       <div className="flex items-center justify-between text-[11px] font-medium uppercase tracking-wider text-zinc-500">
         <span>outback.q5m.io</span>
-        <span className="flex items-center gap-2">
+        <span className="flex items-center gap-3">
           <span className="flex items-center gap-1.5">
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -372,11 +376,41 @@ function Footer({ commitSha }) {
             </svg>
             <span>q5m</span>
           </span>
-          <span className="font-mono normal-case tracking-normal" title={commitSha}>
+          <a
+            href={REPO_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Source on GitHub"
+            className="inline-flex items-center text-zinc-500 transition hover:text-zinc-900"
+          >
+            <GithubIcon />
+          </a>
+          <a
+            href={shaHref}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={commitSha}
+            className="font-mono normal-case tracking-normal text-zinc-500 transition hover:text-zinc-900"
+          >
             {commitSha?.slice(0, 7) ?? "dev"}
-          </span>
+          </a>
         </span>
       </div>
     </footer>
+  );
+}
+
+function GithubIcon() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden="true"
+    >
+      <path d="M12 .5C5.73.5.67 5.56.67 11.83c0 5.02 3.24 9.27 7.74 10.78.57.1.78-.25.78-.55 0-.27-.01-1.17-.02-2.13-3.15.69-3.81-1.34-3.81-1.34-.51-1.31-1.25-1.66-1.25-1.66-1.02-.7.08-.69.08-.69 1.13.08 1.72 1.16 1.72 1.16 1 1.72 2.63 1.22 3.27.93.1-.73.39-1.22.71-1.5-2.51-.29-5.16-1.26-5.16-5.6 0-1.24.44-2.25 1.16-3.04-.12-.29-.5-1.45.11-3.02 0 0 .95-.3 3.11 1.16.9-.25 1.87-.38 2.83-.38.96 0 1.93.13 2.83.38 2.16-1.46 3.11-1.16 3.11-1.16.61 1.57.23 2.73.11 3.02.72.79 1.16 1.8 1.16 3.04 0 4.35-2.66 5.31-5.19 5.59.4.34.76 1.02.76 2.06 0 1.49-.01 2.69-.01 3.06 0 .3.21.66.79.55 4.49-1.5 7.73-5.76 7.73-10.78C23.33 5.56 18.27.5 12 .5z" />
+    </svg>
   );
 }
