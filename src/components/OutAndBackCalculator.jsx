@@ -28,6 +28,24 @@ function solveSpeedFromPower({ power, cda, mass, vhwMs, gradePct, crr, lossDtPct
   return v;
 }
 
+function legBackground(parallelHeadKph) {
+  const max = 20;
+  const t = Math.max(-1, Math.min(1, parallelHeadKph / max));
+  const lerp = (a, b, x) => a + (b - a) * x;
+  let r, g, b;
+  if (t >= 0) {
+    r = lerp(250, 253, t);
+    g = lerp(250, 164, t);
+    b = lerp(250, 175, t);
+  } else {
+    const at = -t;
+    r = lerp(250, 110, at);
+    g = lerp(250, 231, at);
+    b = lerp(250, 183, at);
+  }
+  return `rgb(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)})`;
+}
+
 function findPowerForAvg({ targetAvg, fixedPower, fixedLeg, physics, vhwOutMs, vhwBackMs, gradeOut, gradeBack }) {
   let lo = 1, hi = 2000;
   for (let i = 0; i < 40; i++) {
@@ -142,11 +160,11 @@ export default function OutAndBackCalculator({ commitSha }) {
   const isPower = mode === "power";
   let data;
   if (isPower) {
-    data = { base: pIdealAvg, vOut: pOut, vBack: pBack, vAvg: pAvg, dvAvg: pDvAvg, tBase: pTBase, tAct: pTAct, dt: pDt };
+    data = { base: pIdealAvg, vOut: pOut, vBack: pBack, vAvg: pAvg, dvAvg: pDvAvg, tBase: pTBase, tAct: pTAct, dt: pDt, headOut: windParallelKph };
   } else if (isReverse) {
-    data = { base: rBase, vOut: rOut, vBack: rBack, vAvg: rAvg, dvAvg: rDvAvg, tBase: rTBase, tAct: rTAct, dt: rDt };
+    data = { base: rBase, vOut: rOut, vBack: rBack, vAvg: rAvg, dvAvg: rDvAvg, tBase: rTBase, tAct: rTAct, dt: rDt, headOut: (rBack - rOut) / 2 };
   } else {
-    data = { base: baseSpeed, vOut: fOut, vBack: fBack, vAvg: fAvg, dvAvg: fDvAvg, tBase: fTBase, tAct: fTAct, dt: fDt };
+    data = { base: baseSpeed, vOut: fOut, vBack: fBack, vAvg: fAvg, dvAvg: fDvAvg, tBase: fTBase, tAct: fTAct, dt: fDt, headOut: deltaV };
   }
 
   const formatTime = (mins) => {
@@ -234,17 +252,23 @@ export default function OutAndBackCalculator({ commitSha }) {
 
       <div className="relative mt-4">
         <div className="flex h-9 overflow-hidden rounded-lg border border-zinc-200">
-          <div className="flex flex-1 items-center justify-between border-r border-zinc-200 bg-zinc-50 px-3">
+          <div
+            className="flex flex-1 items-center justify-between border-r border-zinc-200 px-3 transition-colors"
+            style={{ backgroundColor: legBackground(+data.headOut) }}
+          >
             <ArrowRight className="h-3.5 w-3.5 text-zinc-700" strokeWidth={2.5} />
             <Num className="text-xs font-semibold text-zinc-900">
               {data.vOut.toFixed(1)} kph
             </Num>
           </div>
-          <div className="flex flex-1 items-center justify-between bg-emerald-50 px-3">
-            <Num className="text-xs font-semibold text-emerald-900">
+          <div
+            className="flex flex-1 items-center justify-between px-3 transition-colors"
+            style={{ backgroundColor: legBackground(-data.headOut) }}
+          >
+            <Num className="text-xs font-semibold text-zinc-900">
               {data.vBack.toFixed(1)} kph
             </Num>
-            <ArrowRight className="h-3.5 w-3.5 rotate-180 text-emerald-700" strokeWidth={2.5} />
+            <ArrowRight className="h-3.5 w-3.5 rotate-180 text-zinc-700" strokeWidth={2.5} />
           </div>
         </div>
         <div className="mono mt-1.5 flex justify-between text-[10px] uppercase tracking-wider text-zinc-500">
