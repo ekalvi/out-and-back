@@ -38,10 +38,12 @@ export default function OutAndBackCalculator({ commitSha }) {
   const [vOut, setVOut] = useState(36);
   const [vBack, setVBack] = useState(50);
 
-  const [power, setPower] = useState(250);
+  const [powerOut, setPowerOut] = useState(250);
+  const [powerBack, setPowerBack] = useState(250);
   const [cda, setCda] = useState(0.22);
   const [mass, setMass] = useState(75);
   const [windKph, setWindKph] = useState(15);
+  const [windAngle, setWindAngle] = useState(0);
   const [grade, setGrade] = useState(0);
   const [crr, setCrr] = useState(0.004);
   const [lossDt, setLossDt] = useState(2);
@@ -66,17 +68,23 @@ export default function OutAndBackCalculator({ commitSha }) {
   const rTAct = (distance / rAvg) * 60;
   const rDt = (rTAct - rTBase) * 60;
 
-  const windMs = windKph / 3.6;
-  const physicsArgs = { power, cda, mass, crr, lossDtPct: lossDt, rho, draft };
-  const pIdealMs = solveSpeedFromPower({ ...physicsArgs, vhwMs: 0, gradePct: 0 });
-  const pOutMs = solveSpeedFromPower({ ...physicsArgs, vhwMs: +windMs, gradePct: +grade });
-  const pBackMs = solveSpeedFromPower({ ...physicsArgs, vhwMs: -windMs, gradePct: -grade });
-  const pIdeal = pIdealMs * 3.6;
+  const windAngleRad = (windAngle * Math.PI) / 180;
+  const windParallelKph = windKph * Math.cos(windAngleRad);
+  const windCrossKph = Math.abs(windKph * Math.sin(windAngleRad));
+  const windParallelMs = windParallelKph / 3.6;
+  const physicsBase = { cda, mass, crr, lossDtPct: lossDt, rho, draft };
+  const pOutMs = solveSpeedFromPower({ ...physicsBase, power: powerOut, vhwMs: +windParallelMs, gradePct: +grade });
+  const pBackMs = solveSpeedFromPower({ ...physicsBase, power: powerBack, vhwMs: -windParallelMs, gradePct: -grade });
+  const pIdealOutMs = solveSpeedFromPower({ ...physicsBase, power: powerOut, vhwMs: 0, gradePct: 0 });
+  const pIdealBackMs = solveSpeedFromPower({ ...physicsBase, power: powerBack, vhwMs: 0, gradePct: 0 });
   const pOut = pOutMs * 3.6;
   const pBack = pBackMs * 3.6;
+  const pIdealOut = pIdealOutMs * 3.6;
+  const pIdealBack = pIdealBackMs * 3.6;
+  const pIdealAvg = (2 * pIdealOut * pIdealBack) / (pIdealOut + pIdealBack);
   const pAvg = (2 * pOut * pBack) / (pOut + pBack);
-  const pDvAvg = pIdeal - pAvg;
-  const pTBase = (distance / pIdeal) * 60;
+  const pDvAvg = pIdealAvg - pAvg;
+  const pTBase = (distance / pIdealAvg) * 60;
   const pTAct = (distance / pAvg) * 60;
   const pDt = (pTAct - pTBase) * 60;
 
@@ -84,7 +92,7 @@ export default function OutAndBackCalculator({ commitSha }) {
   const isPower = mode === "power";
   let data;
   if (isPower) {
-    data = { base: pIdeal, vOut: pOut, vBack: pBack, vAvg: pAvg, dvAvg: pDvAvg, tBase: pTBase, tAct: pTAct, dt: pDt };
+    data = { base: pIdealAvg, vOut: pOut, vBack: pBack, vAvg: pAvg, dvAvg: pDvAvg, tBase: pTBase, tAct: pTAct, dt: pDt };
   } else if (isReverse) {
     data = { base: rBase, vOut: rOut, vBack: rBack, vAvg: rAvg, dvAvg: rDvAvg, tBase: rTBase, tAct: rTAct, dt: rDt };
   } else {
@@ -231,11 +239,51 @@ export default function OutAndBackCalculator({ commitSha }) {
               </div>
             )}
             {mode === "power" && (
-              <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-3">
-                  <NumberInput label="Power" value={power} onChange={setPower} unit="W" step={5} />
-                  <NumberInput label="Headwind" value={windKph} onChange={setWindKph} unit="kph" step={0.5} />
+              <div className="space-y-5">
+                <SliderInput label="Out leg power" value={powerOut} onChange={setPowerOut} min={100} max={500} step={5} unit="W" />
+                <SliderInput label="Back leg power" value={powerBack} onChange={setPowerBack} min={100} max={500} step={5} unit="W" />
+
+                <div className="space-y-3 rounded-lg border border-zinc-200 bg-zinc-50/60 p-3">
+                  <Eyebrow>Wind</Eyebrow>
+                  <SliderInput label="Speed" value={windKph} onChange={setWindKph} min={0} max={40} step={0.5} unit="kph" />
+                  <SliderInput label="Direction" value={windAngle} onChange={setWindAngle} min={0} max={360} step={5} unit="°" />
+                  <div className="flex items-center gap-3 pt-1">
+                    <WindCompass angleDeg={windAngle} hasWind={windKph > 0.05} />
+                    <div className="mono flex-1 space-y-1 text-[11px]">
+                      <div className="flex justify-between">
+                        <span className="text-zinc-500">Out leg</span>
+                        <span className="text-zinc-900">
+                          {Math.abs(windParallelKph) < 0.05
+                            ? "—"
+                            : (windParallelKph > 0 ? "−" : "+") +
+                              Math.abs(windParallelKph).toFixed(1) +
+                              " kph"}
+                          <span className="ml-1 text-zinc-400">
+                            {Math.abs(windParallelKph) < 0.05 ? "" : windParallelKph > 0 ? "head" : "tail"}
+                          </span>
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-zinc-500">Back leg</span>
+                        <span className="text-zinc-900">
+                          {Math.abs(windParallelKph) < 0.05
+                            ? "—"
+                            : (windParallelKph > 0 ? "+" : "−") +
+                              Math.abs(windParallelKph).toFixed(1) +
+                              " kph"}
+                          <span className="ml-1 text-zinc-400">
+                            {Math.abs(windParallelKph) < 0.05 ? "" : windParallelKph > 0 ? "tail" : "head"}
+                          </span>
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-zinc-500">Crosswind</span>
+                        <span className="text-zinc-900">{windCrossKph.toFixed(1)} kph</span>
+                      </div>
+                    </div>
+                  </div>
                 </div>
+
                 <div className="grid grid-cols-2 gap-3">
                   <NumberInput label="CdA" value={cda} onChange={setCda} unit="m²" step={0.005} />
                   <NumberInput label="Total mass" value={mass} onChange={setMass} unit="kg" step={0.5} />
@@ -265,10 +313,10 @@ export default function OutAndBackCalculator({ commitSha }) {
                 )}
                 <div className="flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5">
                   <span className="text-[11px] font-semibold uppercase tracking-wider text-emerald-800">
-                    No-wind, flat speed
+                    No-wind, flat avg
                   </span>
                   <Num className="text-base font-semibold text-emerald-900">
-                    {pIdeal.toFixed(2)} <span className="text-xs font-normal text-emerald-700">kph</span>
+                    {pIdealAvg.toFixed(2)} <span className="text-xs font-normal text-emerald-700">kph</span>
                   </Num>
                 </div>
               </div>
@@ -366,7 +414,19 @@ export default function OutAndBackCalculator({ commitSha }) {
               P·η = ½·ρ·CdA·draft·(v+v_w)²·v + m·g·(Crr·cosθ + sinθ)·v
             </p>
             <p className="mt-2 px-1 text-xs leading-relaxed text-zinc-500">
-              At fixed power, headwind costs more time than the equivalent tailwind saves — aero drag scales with apparent-wind squared.
+              At fixed power, headwind costs more time than the equivalent tailwind saves — aero drag scales with apparent-wind squared. Wind direction is decomposed into a parallel (head/tail) and crosswind component; only the parallel piece changes apparent wind here.
+            </p>
+            <p className="mt-2 px-1 text-[11px] leading-relaxed text-zinc-500">
+              Power model adapted from{" "}
+              <a
+                href="https://github.com/gmerritt123/ttt_model/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline decoration-zinc-300 underline-offset-2 transition hover:text-zinc-900 hover:decoration-zinc-500"
+              >
+                gmerritt123/ttt_model
+              </a>
+              .
             </p>
           </>
         ) : (
@@ -452,6 +512,99 @@ function NumberInput({ label, value, onChange, unit, step }) {
         </span>
       </div>
     </div>
+  );
+}
+
+function SliderInput({ label, value, onChange, min, max, step, unit }) {
+  const pct = max === min ? 0 : ((value - min) / (max - min)) * 100;
+  const clampedPct = Math.max(0, Math.min(100, pct));
+  return (
+    <div>
+      <div className="mb-1.5 flex items-baseline justify-between">
+        <label className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+          {label}
+        </label>
+        <Num className="text-sm">
+          <span className="font-semibold text-zinc-950">{value}</span>
+          {unit && <span className="ml-1 text-zinc-400">{unit}</span>}
+        </Num>
+      </div>
+      <div className="flex items-center gap-3">
+        <input
+          type="range"
+          min={min}
+          max={max}
+          step={step}
+          value={value}
+          onChange={(e) => onChange(parseFloat(e.target.value))}
+          className="slider-thumb h-2 flex-1 cursor-pointer rounded-full"
+          style={{
+            background: `linear-gradient(to right, #18181b 0%, #18181b ${clampedPct}%, #e4e4e7 ${clampedPct}%, #e4e4e7 100%)`,
+          }}
+        />
+        <input
+          type="number"
+          value={value}
+          step={step}
+          onChange={(e) => {
+            const v = parseFloat(e.target.value);
+            if (!isNaN(v)) onChange(v);
+          }}
+          className="mono w-20 rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-sm font-medium text-zinc-950 transition-all hover:border-zinc-300 focus:border-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-900/15"
+        />
+      </div>
+    </div>
+  );
+}
+
+function WindCompass({ angleDeg, hasWind }) {
+  const cx = 40, cy = 40, r = 28;
+  const rad = (angleDeg * Math.PI) / 180;
+  const sx = cx + r * Math.sin(rad);
+  const sy = cy - r * Math.cos(rad);
+  const innerR = 6;
+  const tx = cx - innerR * Math.sin(rad);
+  const ty = cy + innerR * Math.cos(rad);
+  return (
+    <svg viewBox="0 0 80 80" className="h-16 w-16 flex-shrink-0">
+      <defs>
+        <marker id="wind-arrow-head" markerWidth="5" markerHeight="5" refX="4" refY="2.5" orient="auto">
+          <path d="M0,0 L5,2.5 L0,5 z" fill="#10b981" />
+        </marker>
+      </defs>
+      <circle cx={cx} cy={cy} r={r} fill="white" stroke="#e4e4e7" strokeWidth="1" />
+      <line
+        x1={cx}
+        y1={cy - r + 4}
+        x2={cx}
+        y2={cy + r - 4}
+        stroke="#d4d4d8"
+        strokeWidth="0.8"
+        strokeDasharray="2 2"
+      />
+      <path
+        d={`M${cx},${cy - r + 1} L${cx - 2.5},${cy - r + 5} L${cx + 2.5},${cy - r + 5} Z`}
+        fill="#52525b"
+      />
+      <text x={cx} y={cy - 1} textAnchor="middle" fontSize="6" fontWeight="600" fill="#a1a1aa" fontFamily="ui-monospace, monospace">
+        OUT
+      </text>
+      <text x={cx} y={cy + 7} textAnchor="middle" fontSize="6" fontWeight="600" fill="#a1a1aa" fontFamily="ui-monospace, monospace">
+        BACK
+      </text>
+      {hasWind && (
+        <line
+          x1={sx}
+          y1={sy}
+          x2={tx}
+          y2={ty}
+          stroke="#10b981"
+          strokeWidth="2.2"
+          strokeLinecap="round"
+          markerEnd="url(#wind-arrow-head)"
+        />
+      )}
+    </svg>
   );
 }
 
