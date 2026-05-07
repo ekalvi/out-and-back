@@ -1,5 +1,58 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Wind, Clock, Gauge, ArrowRight, ChevronDown } from "lucide-react";
+
+const STATE_KEYS = [
+  ["mode", "mo", "string"],
+  ["baseSpeed", "bs", "number"],
+  ["distance", "di", "number"],
+  ["deltaV", "dv", "number"],
+  ["vOut", "vo", "number"],
+  ["vBack", "vb", "number"],
+  ["powerOut", "po", "number"],
+  ["powerBack", "pb", "number"],
+  ["powerAvg", "pa", "number"],
+  ["autoPowerSlider", "ap", "string"],
+  ["cda", "cd", "number"],
+  ["riderMass", "rm", "number"],
+  ["bikeMass", "bm", "number"],
+  ["windKph", "ws", "number"],
+  ["windFactorPct", "wf", "number"],
+  ["windAngle", "wa", "number"],
+  ["courseHeading", "ch", "number"],
+  ["grade", "gr", "number"],
+  ["crr", "cr", "number"],
+  ["lossDt", "ld", "number"],
+  ["rho", "rh", "number"],
+  ["draft", "df", "number"],
+];
+
+function encodeStateToHash(state) {
+  const p = new URLSearchParams();
+  for (const [longK, shortK] of STATE_KEYS) {
+    const v = state[longK];
+    if (v === undefined || v === null) continue;
+    p.set(shortK, String(v));
+  }
+  return p.toString();
+}
+
+function decodeStateFromHash(hash) {
+  const trimmed = hash.startsWith("#") ? hash.slice(1) : hash;
+  if (!trimmed) return {};
+  const p = new URLSearchParams(trimmed);
+  const out = {};
+  for (const [longK, shortK, type] of STATE_KEYS) {
+    if (!p.has(shortK)) continue;
+    const raw = p.get(shortK);
+    if (type === "number") {
+      const n = parseFloat(raw);
+      if (!isNaN(n)) out[longK] = n;
+    } else {
+      out[longK] = raw;
+    }
+  }
+  return out;
+}
 
 const G = 9.80665;
 
@@ -102,8 +155,8 @@ export default function OutAndBackCalculator({ commitSha }) {
   const [distance, setDistance] = useState(14.10);
   const [deltaV, setDeltaV] = useState(5);
 
-  const [vOut, setVOut] = useState(36);
-  const [vBack, setVBack] = useState(50);
+  const [vOut, setVOut] = useState(36.3);
+  const [vBack, setVBack] = useState(50.2);
 
   const [powerOut, setPowerOut] = useState(298);
   const [powerBack, setPowerBack] = useState(319);
@@ -123,8 +176,37 @@ export default function OutAndBackCalculator({ commitSha }) {
   const [draft, setDraft] = useState(1.0);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [compareOpen, setCompareOpen] = useState(false);
-  const [actualVOut, setActualVOut] = useState(36.3);
-  const [actualVBack, setActualVBack] = useState(50.2);
+  const [shareCopied, setShareCopied] = useState(false);
+  const [presets, setPresets] = useState(() => {
+    if (typeof window === "undefined") return [];
+    try { return JSON.parse(window.localStorage.getItem("outback:presets") || "[]"); }
+    catch { return []; }
+  });
+
+  const SETTERS = {
+    mode: setMode,
+    baseSpeed: setBaseSpeed, distance: setDistance, deltaV: setDeltaV,
+    vOut: setVOut, vBack: setVBack,
+    powerOut: setPowerOut, powerBack: setPowerBack, powerAvg: setPowerAvg,
+    autoPowerSlider: setAutoPowerSlider,
+    cda: setCda, riderMass: setRiderMass, bikeMass: setBikeMass,
+    windKph: setWindKph, windFactorPct: setWindFactorPct, windAngle: setWindAngle,
+    courseHeading: setCourseHeading,
+    grade: setGrade, crr: setCrr, lossDt: setLossDt, rho: setRho, draft: setDraft,
+  };
+
+  const applyState = (s) => {
+    for (const [key, value] of Object.entries(s)) {
+      if (SETTERS[key]) SETTERS[key](value);
+    }
+  };
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.location.hash) return;
+    const decoded = decodeStateFromHash(window.location.hash);
+    applyState(decoded);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const fOut = Math.max(0.1, baseSpeed - deltaV);
   const fBack = baseSpeed + deltaV;
@@ -218,6 +300,47 @@ export default function OutAndBackCalculator({ commitSha }) {
     else if (autoPowerSlider === "back") setPowerBack(Math.round(displayedBack));
     else if (autoPowerSlider === "avg") setPowerAvg(Math.round(displayedAvg));
     setAutoPowerSlider(newTarget);
+  }
+
+  function getCurrentState() {
+    return {
+      mode, baseSpeed, distance, deltaV, vOut, vBack,
+      powerOut, powerBack, powerAvg, autoPowerSlider,
+      cda, riderMass, bikeMass,
+      windKph, windFactorPct, windAngle, courseHeading,
+      grade, crr, lossDt, rho, draft,
+    };
+  }
+
+  function handleShare() {
+    if (typeof window === "undefined") return;
+    const hash = encodeStateToHash(getCurrentState());
+    const url = `${window.location.origin}${window.location.pathname}#${hash}`;
+    navigator.clipboard.writeText(url).then(() => {
+      setShareCopied(true);
+      setTimeout(() => setShareCopied(false), 1500);
+    });
+  }
+
+  function handleSavePreset() {
+    const name = window.prompt("Save preset as:");
+    if (!name) return;
+    const next = [...presets.filter((p) => p.name !== name), { name, state: getCurrentState() }];
+    setPresets(next);
+    window.localStorage.setItem("outback:presets", JSON.stringify(next));
+  }
+
+  function handleLoadPreset(name) {
+    const preset = presets.find((p) => p.name === name);
+    if (!preset) return;
+    applyState(preset.state);
+  }
+
+  function handleDeletePreset(name) {
+    if (!window.confirm(`Delete preset "${name}"?`)) return;
+    const next = presets.filter((p) => p.name !== name);
+    setPresets(next);
+    window.localStorage.setItem("outback:presets", JSON.stringify(next));
   }
 
   const penaltyCard = (
@@ -360,8 +483,8 @@ export default function OutAndBackCalculator({ commitSha }) {
         {mode === "reverse" && (
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
-              <NumberInput label="Out leg" value={vOut} onChange={setVOut} unit="kph" step={0.5} />
-              <NumberInput label="Back leg" value={vBack} onChange={setVBack} unit="kph" step={0.5} />
+              <NumberInput label="Out leg" value={vOut} onChange={setVOut} unit="kph" step={0.1} />
+              <NumberInput label="Back leg" value={vBack} onChange={setVBack} unit="kph" step={0.1} />
             </div>
             <NumberInput label="Total distance" value={distance} onChange={setDistance} unit="km" step={0.1} />
             <div className="flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5">
@@ -411,8 +534,7 @@ export default function OutAndBackCalculator({ commitSha }) {
             <div className="space-y-3 rounded-lg border border-zinc-200 bg-zinc-50/60 p-3">
               <Eyebrow>Course & wind</Eyebrow>
               <SliderInput label="Course heading (out)" value={courseHeading} onChange={setCourseHeading} min={0} max={360} step={5} unit="°" />
-              <SliderInput label="Wind speed (reported)" value={windKph} onChange={setWindKph} min={0} max={50} step={0.5} unit="kph" />
-              <SliderInput label="Wind factor" value={windFactorPct} onChange={setWindFactorPct} min={30} max={100} step={5} unit="%" />
+              <SliderInput label="Wind speed" value={windKph} onChange={setWindKph} min={0} max={50} step={0.5} unit="kph" />
               <SliderInput label="Wind from" value={windAngle} onChange={setWindAngle} min={0} max={360} step={5} unit="°" />
               <div className="flex items-center gap-3 pt-1">
                 <WindCompass courseHeadingDeg={courseHeading} windAngleDeg={windAngle} hasWind={windKph > 0.05} />
@@ -453,13 +575,26 @@ export default function OutAndBackCalculator({ commitSha }) {
                   </div>
                 </div>
               </div>
-              <p className="text-[10px] leading-relaxed text-zinc-500">
-                Wind speed from weather apps / intervals.icu is measured at ~10 m height. At cyclist height (~1-2 m), wind is typically 60-80% of that due to the boundary layer + terrain. Lower for sheltered courses, higher for open plains.
-              </p>
             </div>
 
             <div className="grid grid-cols-2 gap-3">
-              <NumberInput label="CdA" value={cda} onChange={setCda} unit="m²" step={0.005} />
+              <div className="space-y-1.5">
+                <NumberInput label="CdA" value={cda} onChange={setCda} unit="m²" step={0.005} />
+                <button
+                  type="button"
+                  onClick={() => {
+                    const fitted = impliedCdAFromSplits({
+                      vOutKph: vOut, vBackKph: vBack,
+                      pOut: displayedOut, pBack: displayedBack,
+                      vhwParallelMs: windParallelMs, physics: physicsBase,
+                    });
+                    setCda(parseFloat(fitted.toFixed(3)));
+                  }}
+                  className="w-full rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-600 transition hover:border-zinc-300 hover:bg-zinc-50 hover:text-zinc-900"
+                >
+                  Fit to splits
+                </button>
+              </div>
               <NumberInput label="Rider mass" value={riderMass} onChange={setRiderMass} unit="kg" step={0.5} />
             </div>
             <div className="grid grid-cols-2 gap-3">
@@ -478,12 +613,18 @@ export default function OutAndBackCalculator({ commitSha }) {
               />
             </button>
             {advancedOpen && (
-              <div className="grid grid-cols-2 gap-3">
-                <NumberInput label="Bike mass" value={bikeMass} onChange={setBikeMass} unit="kg" step={0.1} />
-                <NumberInput label="Crr" value={crr} onChange={setCrr} unit="" step={0.0005} />
-                <NumberInput label="Drivetrain loss" value={lossDt} onChange={setLossDt} unit="%" step={0.5} />
-                <NumberInput label="Air density" value={rho} onChange={setRho} unit="kg/m³" step={0.005} />
-                <NumberInput label="Draft factor" value={draft} onChange={setDraft} unit="" step={0.05} />
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <NumberInput label="Bike mass" value={bikeMass} onChange={setBikeMass} unit="kg" step={0.1} />
+                  <NumberInput label="Wind factor" value={windFactorPct} onChange={setWindFactorPct} unit="%" step={5} />
+                  <NumberInput label="Crr" value={crr} onChange={setCrr} unit="" step={0.0005} />
+                  <NumberInput label="Drivetrain loss" value={lossDt} onChange={setLossDt} unit="%" step={0.5} />
+                  <NumberInput label="Air density" value={rho} onChange={setRho} unit="kg/m³" step={0.005} />
+                  <NumberInput label="Draft factor" value={draft} onChange={setDraft} unit="" step={0.05} />
+                </div>
+                <p className="text-[10px] leading-relaxed text-zinc-500">
+                  Wind factor: weather-app wind speed is measured at ~10 m. At cyclist height (~1-2 m), wind is typically 60-80% of that due to the boundary layer + terrain. Lower for sheltered courses, higher for open plains.
+                </p>
               </div>
             )}
             <div className="flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5">
@@ -509,9 +650,12 @@ export default function OutAndBackCalculator({ commitSha }) {
             {compareOpen && (
               <div className="space-y-3 rounded-lg border border-zinc-200 bg-zinc-50/60 p-3">
                 <div className="grid grid-cols-2 gap-3">
-                  <NumberInput label="Actual out" value={actualVOut} onChange={setActualVOut} unit="kph" step={0.1} />
-                  <NumberInput label="Actual back" value={actualVBack} onChange={setActualVBack} unit="kph" step={0.1} />
+                  <NumberInput label="Actual out" value={vOut} onChange={setVOut} unit="kph" step={0.1} />
+                  <NumberInput label="Actual back" value={vBack} onChange={setVBack} unit="kph" step={0.1} />
                 </div>
+                <p className="text-[10px] text-zinc-500">
+                  Shared with the Splits tab — change here or there.
+                </p>
                 <div className="mono space-y-1 text-[11px]">
                   <div className="flex justify-between">
                     <span className="text-zinc-500">Predicted</span>
@@ -519,27 +663,27 @@ export default function OutAndBackCalculator({ commitSha }) {
                   </div>
                   <div className="flex justify-between">
                     <span className="text-zinc-500">Δ vs actual</span>
-                    <span className={Math.abs(pOut - actualVOut) + Math.abs(pBack - actualVBack) > 2 ? "text-rose-700" : "text-zinc-900"}>
-                      {(pOut - actualVOut >= 0 ? "+" : "") + (pOut - actualVOut).toFixed(1)} · {(pBack - actualVBack >= 0 ? "+" : "") + (pBack - actualVBack).toFixed(1)} kph
+                    <span className={Math.abs(pOut - vOut) + Math.abs(pBack - vBack) > 2 ? "text-rose-700" : "text-zinc-900"}>
+                      {(pOut - vOut >= 0 ? "+" : "") + (pOut - vOut).toFixed(1)} · {(pBack - vBack >= 0 ? "+" : "") + (pBack - vBack).toFixed(1)} kph
                     </span>
                   </div>
                   <div className="flex justify-between border-t border-zinc-200 pt-1">
                     <span className="text-zinc-500">Implied ‖ wind</span>
                     <span className="text-zinc-900">
-                      {impliedParallelWindKph({ vOutKph: actualVOut, vBackKph: actualVBack, pOut: displayedOut, pBack: displayedBack, physics: physicsBase }).toFixed(1)}
+                      {impliedParallelWindKph({ vOutKph: vOut, vBackKph: vBack, pOut: displayedOut, pBack: displayedBack, physics: physicsBase }).toFixed(1)}
                       <span className="ml-1 text-zinc-400">kph (vs your {windParallelKph.toFixed(1)})</span>
                     </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-zinc-500">Implied CdA</span>
                     <span className="text-zinc-900">
-                      {impliedCdAFromSplits({ vOutKph: actualVOut, vBackKph: actualVBack, pOut: displayedOut, pBack: displayedBack, vhwParallelMs: windParallelMs, physics: physicsBase }).toFixed(3)}
+                      {impliedCdAFromSplits({ vOutKph: vOut, vBackKph: vBack, pOut: displayedOut, pBack: displayedBack, vhwParallelMs: windParallelMs, physics: physicsBase }).toFixed(3)}
                       <span className="ml-1 text-zinc-400">m² (vs your {cda.toFixed(3)})</span>
                     </span>
                   </div>
                 </div>
                 <p className="text-[10px] leading-relaxed text-zinc-500">
-                  Implied ‖ wind = parallel headwind that fits your splits, holding CdA fixed. Implied CdA = aero coefficient that fits, holding wind fixed. If both differ from your inputs, your real ride probably had a mix of both effects.
+                  Implied ‖ wind = parallel headwind that fits your splits, holding CdA fixed. Implied CdA = aero coefficient that fits, holding wind fixed.
                 </p>
               </div>
             )}
@@ -607,16 +751,33 @@ export default function OutAndBackCalculator({ commitSha }) {
           </p>
         </header>
 
-        <div className="mb-5 inline-flex gap-0.5 rounded-xl bg-zinc-200/70 p-1">
-          <ModeTab active={mode === "power"} onClick={() => setMode("power")}>
-            Power
-          </ModeTab>
-          <ModeTab active={mode === "forward"} onClick={() => setMode("forward")}>
-            Δv
-          </ModeTab>
-          <ModeTab active={mode === "reverse"} onClick={() => setMode("reverse")}>
-            Splits
-          </ModeTab>
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+          <div className="inline-flex gap-0.5 rounded-xl bg-zinc-200/70 p-1">
+            <ModeTab active={mode === "power"} onClick={() => setMode("power")}>
+              Power
+            </ModeTab>
+            <ModeTab active={mode === "forward"} onClick={() => setMode("forward")}>
+              Δv
+            </ModeTab>
+            <ModeTab active={mode === "reverse"} onClick={() => setMode("reverse")}>
+              Splits
+            </ModeTab>
+          </div>
+          <div className="flex items-center gap-2">
+            <PresetMenu
+              presets={presets}
+              onLoad={handleLoadPreset}
+              onSave={handleSavePreset}
+              onDelete={handleDeletePreset}
+            />
+            <button
+              type="button"
+              onClick={handleShare}
+              className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-700 transition hover:border-zinc-300 hover:text-zinc-900"
+            >
+              {shareCopied ? "Copied!" : "Share"}
+            </button>
+          </div>
         </div>
 
         {penaltyCard}
@@ -690,6 +851,58 @@ function Num({ children, className = "", ...props }) {
 
 function Separator() {
   return <div className="my-5 h-px w-full bg-zinc-100 sm:my-6" />;
+}
+
+function PresetMenu({ presets, onLoad, onSave, onDelete }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-700 transition hover:border-zinc-300 hover:text-zinc-900"
+      >
+        Presets
+      </button>
+      {open && (
+        <>
+          <div
+            className="fixed inset-0 z-10"
+            onClick={() => setOpen(false)}
+          />
+          <div className="absolute right-0 top-full z-20 mt-1 w-56 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-lg">
+            <button
+              type="button"
+              onClick={() => { setOpen(false); onSave(); }}
+              className="block w-full px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wider text-zinc-700 transition hover:bg-zinc-50 hover:text-zinc-900"
+            >
+              + Save current as…
+            </button>
+            {presets.length > 0 && <div className="h-px bg-zinc-100" />}
+            {presets.map((p) => (
+              <div key={p.name} className="flex items-center">
+                <button
+                  type="button"
+                  onClick={() => { setOpen(false); onLoad(p.name); }}
+                  className="flex-1 px-3 py-2 text-left text-xs text-zinc-700 transition hover:bg-zinc-50 hover:text-zinc-900"
+                >
+                  {p.name}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onDelete(p.name)}
+                  aria-label={`Delete ${p.name}`}
+                  className="px-2 py-2 text-xs text-zinc-400 transition hover:text-rose-600"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
 }
 
 function ModeTab({ active, onClick, children }) {
