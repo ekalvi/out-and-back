@@ -3,11 +3,7 @@ import { Wind, Clock, Gauge, ArrowRight, ChevronDown } from "lucide-react";
 
 const STATE_KEYS = [
   ["mode", "mo", "string"],
-  ["baseSpeed", "bs", "number"],
   ["distance", "di", "number"],
-  ["deltaV", "dv", "number"],
-  ["vOut", "vo", "number"],
-  ["vBack", "vb", "number"],
   ["powerOut", "po", "number"],
   ["powerBack", "pb", "number"],
   ["powerAvg", "pa", "number"],
@@ -99,30 +95,52 @@ function legBackground(parallelHeadKph) {
   return `rgb(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)})`;
 }
 
-function impliedParallelWindKph({ vOutKph, vBackKph, pOut, pBack, physics }) {
-  let lo = -40, hi = 40;
-  for (let i = 0; i < 60; i++) {
-    const vwKph = (lo + hi) / 2;
-    const vwMs = vwKph / 3.6;
-    const predOut = solveSpeedFromPower({ ...physics, power: pOut, vhwMs: +vwMs, gradePct: 0 }) * 3.6;
-    const predBack = solveSpeedFromPower({ ...physics, power: pBack, vhwMs: -vwMs, gradePct: 0 }) * 3.6;
-    const sumErr = (predOut - vOutKph) + (vBackKph - predBack);
-    if (sumErr > 0) lo = vwKph;
-    else hi = vwKph;
+function bisectWindForAbsDeltaV({ targetDvKph, courseHeading, windAngle, windFactor, powerOut, powerBack, gradePct, physics }) {
+  const relRad = ((windAngle - courseHeading) * Math.PI) / 180;
+  const cosRel = Math.cos(relRad);
+  const compute = (windKph) => {
+    const eff = windKph * windFactor;
+    const parKph = eff * cosRel;
+    const parMs = parKph / 3.6;
+    const pOutKph = solveSpeedFromPower({ ...physics, power: powerOut, vhwMs: +parMs, gradePct: +gradePct }) * 3.6;
+    const pBackKph = solveSpeedFromPower({ ...physics, power: powerBack, vhwMs: -parMs, gradePct: -gradePct }) * 3.6;
+    return Math.abs((pBackKph - pOutKph) / 2);
+  };
+  let lo = 0, hi = 50;
+  for (let i = 0; i < 50; i++) {
+    const mid = (lo + hi) / 2;
+    if (compute(mid) < targetDvKph) lo = mid;
+    else hi = mid;
   }
   return (lo + hi) / 2;
 }
 
-function impliedCdAFromSplits({ vOutKph, vBackKph, pOut, pBack, vhwParallelMs, physics }) {
-  let lo = 0.10, hi = 0.60;
-  for (let i = 0; i < 60; i++) {
-    const cda = (lo + hi) / 2;
-    const predOut = solveSpeedFromPower({ ...physics, cda, power: pOut, vhwMs: +vhwParallelMs, gradePct: 0 }) * 3.6;
-    const predBack = solveSpeedFromPower({ ...physics, cda, power: pBack, vhwMs: -vhwParallelMs, gradePct: 0 }) * 3.6;
-    const avgPred = (predOut + predBack) / 2;
-    const avgAct = (vOutKph + vBackKph) / 2;
-    if (avgPred > avgAct) lo = cda;
-    else hi = cda;
+function optimizePowerSplit({ targetAvg, physics, vhwOutMs, vhwBackMs, gradeOut, gradeBack, distance }) {
+  const timeAt = (powerOut) => {
+    const powerBack = findPowerForAvg({
+      targetAvg, fixedPower: powerOut, fixedLeg: "out",
+      physics, vhwOutMs, vhwBackMs, gradeOut, gradeBack,
+    });
+    if (powerBack < 1 || powerBack > 1999) return Infinity;
+    const vOutMs = solveSpeedFromPower({ ...physics, power: powerOut, vhwMs: vhwOutMs, gradePct: gradeOut });
+    const vBackMs = solveSpeedFromPower({ ...physics, power: powerBack, vhwMs: vhwBackMs, gradePct: gradeBack });
+    const halfM = (distance * 1000) / 2;
+    return halfM / vOutMs + halfM / vBackMs;
+  };
+  // Golden-section search over powerOut in [50, 800]
+  const phi = (Math.sqrt(5) - 1) / 2;
+  let lo = 50, hi = 800;
+  let m1 = hi - phi * (hi - lo);
+  let m2 = lo + phi * (hi - lo);
+  let t1 = timeAt(m1), t2 = timeAt(m2);
+  for (let i = 0; i < 60 && hi - lo > 0.5; i++) {
+    if (t1 < t2) {
+      hi = m2; m2 = m1; t2 = t1;
+      m1 = hi - phi * (hi - lo); t1 = timeAt(m1);
+    } else {
+      lo = m1; m1 = m2; t1 = t2;
+      m2 = lo + phi * (hi - lo); t2 = timeAt(m2);
+    }
   }
   return (lo + hi) / 2;
 }
@@ -151,12 +169,7 @@ function findPowerForAvg({ targetAvg, fixedPower, fixedLeg, physics, vhwOutMs, v
 export default function OutAndBackCalculator({ commitSha }) {
   const [mode, setMode] = useState("power");
 
-  const [baseSpeed, setBaseSpeed] = useState(45);
   const [distance, setDistance] = useState(14.10);
-  const [deltaV, setDeltaV] = useState(5);
-
-  const [vOut, setVOut] = useState(36.3);
-  const [vBack, setVBack] = useState(50.2);
 
   const [powerOut, setPowerOut] = useState(298);
   const [powerBack, setPowerBack] = useState(319);
@@ -175,7 +188,6 @@ export default function OutAndBackCalculator({ commitSha }) {
   const [rho, setRho] = useState(1.225);
   const [draft, setDraft] = useState(1.0);
   const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [compareOpen, setCompareOpen] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
   const [presets, setPresets] = useState(() => {
     if (typeof window === "undefined") return [];
@@ -185,8 +197,7 @@ export default function OutAndBackCalculator({ commitSha }) {
 
   const SETTERS = {
     mode: setMode,
-    baseSpeed: setBaseSpeed, distance: setDistance, deltaV: setDeltaV,
-    vOut: setVOut, vBack: setVBack,
+    distance: setDistance,
     powerOut: setPowerOut, powerBack: setPowerBack, powerAvg: setPowerAvg,
     autoPowerSlider: setAutoPowerSlider,
     cda: setCda, riderMass: setRiderMass, bikeMass: setBikeMass,
@@ -207,23 +218,6 @@ export default function OutAndBackCalculator({ commitSha }) {
     applyState(decoded);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const fOut = Math.max(0.1, baseSpeed - deltaV);
-  const fBack = baseSpeed + deltaV;
-  const fAvg = (2 * fOut * fBack) / (fOut + fBack);
-  const fDvAvg = baseSpeed - fAvg;
-  const fTBase = (distance / baseSpeed) * 60;
-  const fTAct = (distance / fAvg) * 60;
-  const fDt = (fTAct - fTBase) * 60;
-
-  const rOut = Math.max(0.1, vOut);
-  const rBack = Math.max(0.1, vBack);
-  const rBase = (rOut + rBack) / 2;
-  const rAvg = (2 * rOut * rBack) / (rOut + rBack);
-  const rDvAvg = rBase - rAvg;
-  const rTBase = (distance / rBase) * 60;
-  const rTAct = (distance / rAvg) * 60;
-  const rDt = (rTAct - rTBase) * 60;
 
   const totalMass = riderMass + bikeMass;
   const windFactor = windFactorPct / 100;
@@ -274,14 +268,12 @@ export default function OutAndBackCalculator({ commitSha }) {
 
   const isReverse = mode === "reverse";
   const isPower = mode === "power";
-  let data;
-  if (isPower) {
-    data = { base: pIdealAvg, vOut: pOut, vBack: pBack, vAvg: pAvg, dvAvg: pDvAvg, tBase: pTBase, tAct: pTAct, dt: pDt, headOut: windParallelKph };
-  } else if (isReverse) {
-    data = { base: rBase, vOut: rOut, vBack: rBack, vAvg: rAvg, dvAvg: rDvAvg, tBase: rTBase, tAct: rTAct, dt: rDt, headOut: (rBack - rOut) / 2 };
-  } else {
-    data = { base: baseSpeed, vOut: fOut, vBack: fBack, vAvg: fAvg, dvAvg: fDvAvg, tBase: fTBase, tAct: fTAct, dt: fDt, headOut: deltaV };
-  }
+  const data = {
+    base: pIdealAvg, vOut: pOut, vBack: pBack, vAvg: pAvg,
+    dvAvg: pDvAvg, tBase: pTBase, tAct: pTAct, dt: pDt,
+    headOut: windParallelKph,
+  };
+  const derivedDeltaV = Math.abs((pBack - pOut) / 2);
 
   const formatTime = (mins) => {
     if (!isFinite(mins) || mins < 0) return "—:——.—";
@@ -293,7 +285,32 @@ export default function OutAndBackCalculator({ commitSha }) {
     return `${m}:${s.toString().padStart(2, "0")}.${tenths}`;
   };
 
-  const sliderPct = (deltaV / 15) * 100;
+  const sliderPct = (Math.min(15, derivedDeltaV) / 15) * 100;
+
+  function applyDeltaV(targetDvKph) {
+    const newWind = bisectWindForAbsDeltaV({
+      targetDvKph,
+      courseHeading,
+      windAngle,
+      windFactor,
+      powerOut: displayedOut,
+      powerBack: displayedBack,
+      gradePct: grade,
+      physics: physicsBase,
+    });
+    setWindKph(parseFloat(newWind.toFixed(2)));
+  }
+
+  function handleOptimize() {
+    const optPowerOut = optimizePowerSplit({
+      targetAvg: displayedAvg,
+      physics: physicsBase,
+      vhwOutMs, vhwBackMs, gradeOut, gradeBack,
+      distance,
+    });
+    setPowerOut(Math.round(optPowerOut));
+    setAutoPowerSlider("back");
+  }
 
   function handleAutoChange(newTarget) {
     if (autoPowerSlider === "out") setPowerOut(Math.round(displayedOut));
@@ -304,7 +321,7 @@ export default function OutAndBackCalculator({ commitSha }) {
 
   function getCurrentState() {
     return {
-      mode, baseSpeed, distance, deltaV, vOut, vBack,
+      mode, distance,
       powerOut, powerBack, powerAvg, autoPowerSlider,
       cda, riderMass, bikeMass,
       windKph, windFactorPct, windAngle, courseHeading,
@@ -446,7 +463,15 @@ export default function OutAndBackCalculator({ commitSha }) {
         {mode === "forward" && (
           <div className="space-y-5">
             <div className="grid grid-cols-2 gap-3">
-              <NumberInput label="Base speed" value={baseSpeed} onChange={setBaseSpeed} unit="kph" step={0.5} />
+              <div>
+                <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+                  Base speed
+                </label>
+                <div className="mono w-full rounded-lg border border-zinc-200 bg-zinc-100 px-3 py-2.5 text-base font-medium text-zinc-700">
+                  {pIdealAvg.toFixed(2)} <span className="text-[11px] text-zinc-400">kph</span>
+                </div>
+                <p className="mt-1 text-[10px] text-zinc-500">No-wind avg from Power tab</p>
+              </div>
               <NumberInput label="Distance" value={distance} onChange={setDistance} unit="km" step={0.1} />
             </div>
             <div>
@@ -455,7 +480,7 @@ export default function OutAndBackCalculator({ commitSha }) {
                   Δv per leg
                 </label>
                 <Num className="text-sm">
-                  <span className="font-semibold text-zinc-950">±{deltaV.toFixed(1)}</span>
+                  <span className="font-semibold text-zinc-950">±{derivedDeltaV.toFixed(1)}</span>
                   <span className="ml-1 text-zinc-400">kph</span>
                 </Num>
               </div>
@@ -464,8 +489,8 @@ export default function OutAndBackCalculator({ commitSha }) {
                 min="0"
                 max="15"
                 step="0.5"
-                value={deltaV}
-                onChange={(e) => setDeltaV(parseFloat(e.target.value))}
+                value={Math.min(15, derivedDeltaV)}
+                onChange={(e) => applyDeltaV(parseFloat(e.target.value))}
                 className="slider-thumb h-2 w-full cursor-pointer rounded-full"
                 style={{
                   background: `linear-gradient(to right, #18181b 0%, #18181b ${sliderPct}%, #e4e4e7 ${sliderPct}%, #e4e4e7 100%)`,
@@ -477,24 +502,36 @@ export default function OutAndBackCalculator({ commitSha }) {
                 <span>10</span>
                 <span>15</span>
               </div>
+              <p className="mt-2 text-[10px] text-zinc-500">Adjusts wind speed on the Power tab to produce this asymmetry.</p>
             </div>
           </div>
         )}
         {mode === "reverse" && (
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
-              <NumberInput label="Out leg" value={vOut} onChange={setVOut} unit="kph" step={0.1} />
-              <NumberInput label="Back leg" value={vBack} onChange={setVBack} unit="kph" step={0.1} />
+              <div>
+                <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Out leg</label>
+                <div className="mono w-full rounded-lg border border-zinc-200 bg-zinc-100 px-3 py-2.5 text-base font-medium text-zinc-700">
+                  {pOut.toFixed(2)} <span className="text-[11px] text-zinc-400">kph</span>
+                </div>
+              </div>
+              <div>
+                <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Back leg</label>
+                <div className="mono w-full rounded-lg border border-zinc-200 bg-zinc-100 px-3 py-2.5 text-base font-medium text-zinc-700">
+                  {pBack.toFixed(2)} <span className="text-[11px] text-zinc-400">kph</span>
+                </div>
+              </div>
             </div>
             <NumberInput label="Total distance" value={distance} onChange={setDistance} unit="km" step={0.1} />
             <div className="flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5">
               <span className="text-[11px] font-semibold uppercase tracking-wider text-emerald-800">
-                Implied no-wind speed
+                No-wind, flat avg
               </span>
               <Num className="text-base font-semibold text-emerald-900">
-                {rBase.toFixed(2)} <span className="text-xs font-normal text-emerald-700">kph</span>
+                {pIdealAvg.toFixed(2)} <span className="text-xs font-normal text-emerald-700">kph</span>
               </Num>
             </div>
+            <p className="text-[10px] text-zinc-500">Splits are predicted by the Power tab. Adjust power, wind, CdA there.</p>
           </div>
         )}
         {mode === "power" && (
@@ -529,6 +566,14 @@ export default function OutAndBackCalculator({ commitSha }) {
                 min={100} max={500} step={5} unit="W"
                 disabled={autoPowerSlider === "back"}
               />
+              <button
+                type="button"
+                onClick={handleOptimize}
+                title="Find the power split that minimizes total time at the current avg power"
+                className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-700 transition hover:border-zinc-300 hover:bg-zinc-50 hover:text-zinc-900"
+              >
+                Optimize split for fastest time
+              </button>
             </div>
 
             <div className="space-y-3 rounded-lg border border-zinc-200 bg-zinc-50/60 p-3">
@@ -578,23 +623,7 @@ export default function OutAndBackCalculator({ commitSha }) {
             </div>
 
             <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <NumberInput label="CdA" value={cda} onChange={setCda} unit="m²" step={0.005} />
-                <button
-                  type="button"
-                  onClick={() => {
-                    const fitted = impliedCdAFromSplits({
-                      vOutKph: vOut, vBackKph: vBack,
-                      pOut: displayedOut, pBack: displayedBack,
-                      vhwParallelMs: windParallelMs, physics: physicsBase,
-                    });
-                    setCda(parseFloat(fitted.toFixed(3)));
-                  }}
-                  className="w-full rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-600 transition hover:border-zinc-300 hover:bg-zinc-50 hover:text-zinc-900"
-                >
-                  Fit to splits
-                </button>
-              </div>
+              <NumberInput label="CdA" value={cda} onChange={setCda} unit="m²" step={0.005} />
               <NumberInput label="Rider mass" value={riderMass} onChange={setRiderMass} unit="kg" step={0.5} />
             </div>
             <div className="grid grid-cols-2 gap-3">
@@ -635,58 +664,6 @@ export default function OutAndBackCalculator({ commitSha }) {
                 {pIdealAvg.toFixed(2)} <span className="text-xs font-normal text-emerald-700">kph</span>
               </Num>
             </div>
-
-            <button
-              type="button"
-              onClick={() => setCompareOpen((o) => !o)}
-              className="flex w-full items-center justify-between rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-600 transition hover:border-zinc-300 hover:text-zinc-900"
-            >
-              <span>Compare to actual splits</span>
-              <ChevronDown
-                className={"h-3.5 w-3.5 transition-transform " + (compareOpen ? "rotate-180" : "")}
-                strokeWidth={2.5}
-              />
-            </button>
-            {compareOpen && (
-              <div className="space-y-3 rounded-lg border border-zinc-200 bg-zinc-50/60 p-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <NumberInput label="Actual out" value={vOut} onChange={setVOut} unit="kph" step={0.1} />
-                  <NumberInput label="Actual back" value={vBack} onChange={setVBack} unit="kph" step={0.1} />
-                </div>
-                <p className="text-[10px] text-zinc-500">
-                  Shared with the Splits tab — change here or there.
-                </p>
-                <div className="mono space-y-1 text-[11px]">
-                  <div className="flex justify-between">
-                    <span className="text-zinc-500">Predicted</span>
-                    <span className="text-zinc-900">out {pOut.toFixed(1)} · back {pBack.toFixed(1)} kph</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-zinc-500">Δ vs actual</span>
-                    <span className={Math.abs(pOut - vOut) + Math.abs(pBack - vBack) > 2 ? "text-rose-700" : "text-zinc-900"}>
-                      {(pOut - vOut >= 0 ? "+" : "") + (pOut - vOut).toFixed(1)} · {(pBack - vBack >= 0 ? "+" : "") + (pBack - vBack).toFixed(1)} kph
-                    </span>
-                  </div>
-                  <div className="flex justify-between border-t border-zinc-200 pt-1">
-                    <span className="text-zinc-500">Implied ‖ wind</span>
-                    <span className="text-zinc-900">
-                      {impliedParallelWindKph({ vOutKph: vOut, vBackKph: vBack, pOut: displayedOut, pBack: displayedBack, physics: physicsBase }).toFixed(1)}
-                      <span className="ml-1 text-zinc-400">kph (vs your {windParallelKph.toFixed(1)})</span>
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-zinc-500">Implied CdA</span>
-                    <span className="text-zinc-900">
-                      {impliedCdAFromSplits({ vOutKph: vOut, vBackKph: vBack, pOut: displayedOut, pBack: displayedBack, vhwParallelMs: windParallelMs, physics: physicsBase }).toFixed(3)}
-                      <span className="ml-1 text-zinc-400">m² (vs your {cda.toFixed(3)})</span>
-                    </span>
-                  </div>
-                </div>
-                <p className="text-[10px] leading-relaxed text-zinc-500">
-                  Implied ‖ wind = parallel headwind that fits your splits, holding CdA fixed. Implied CdA = aero coefficient that fits, holding wind fixed.
-                </p>
-              </div>
-            )}
           </div>
         )}
       </div>
@@ -773,9 +750,12 @@ export default function OutAndBackCalculator({ commitSha }) {
             <button
               type="button"
               onClick={handleShare}
-              className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-700 transition hover:border-zinc-300 hover:text-zinc-900"
+              title={shareCopied ? "Copied to clipboard" : "Copy share link"}
+              aria-label="Share"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-700 transition hover:border-zinc-300 hover:text-zinc-900"
             >
-              {shareCopied ? "Copied!" : "Share"}
+              <ShareIcon className="h-4 w-4" />
+              <span className="hidden sm:inline">{shareCopied ? "Copied!" : "Share"}</span>
             </button>
           </div>
         </div>
@@ -853,6 +833,22 @@ function Separator() {
   return <div className="my-5 h-px w-full bg-zinc-100 sm:my-6" />;
 }
 
+function ShareIcon({ className = "h-4 w-4" }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className={className} aria-hidden="true">
+      <path d="M13 4.5a2.5 2.5 0 1 1 .702 1.737L6.97 9.604a2.518 2.518 0 0 1 0 .792l6.733 3.367a2.5 2.5 0 1 1-.671 1.341l-6.733-3.367a2.5 2.5 0 1 1 0-3.475l6.733-3.366A2.52 2.52 0 0 1 13 4.5Z" />
+    </svg>
+  );
+}
+
+function BookmarkIcon({ className = "h-4 w-4" }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className={className} aria-hidden="true">
+      <path fillRule="evenodd" d="M10 2c-1.716 0-3.408.106-5.07.31C3.806 2.45 3 3.414 3 4.517V17.25a.75.75 0 0 0 1.075.676L10 15.082l5.925 2.844A.75.75 0 0 0 17 17.25V4.517c0-1.103-.806-2.068-1.93-2.207A41.403 41.403 0 0 0 10 2Z" clipRule="evenodd" />
+    </svg>
+  );
+}
+
 function PresetMenu({ presets, onLoad, onSave, onDelete }) {
   const [open, setOpen] = useState(false);
   return (
@@ -860,9 +856,12 @@ function PresetMenu({ presets, onLoad, onSave, onDelete }) {
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-700 transition hover:border-zinc-300 hover:text-zinc-900"
+        title="Presets"
+        aria-label="Presets"
+        className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-700 transition hover:border-zinc-300 hover:text-zinc-900"
       >
-        Presets
+        <BookmarkIcon className="h-4 w-4" />
+        <span className="hidden sm:inline">Presets</span>
       </button>
       {open && (
         <>
