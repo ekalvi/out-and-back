@@ -63,7 +63,7 @@ export default function OutAndBackCalculator({ commitSha }) {
   const [powerBack, setPowerBack] = useState(319);
   const [powerAvg, setPowerAvg] = useState(305);
   const [autoPowerSlider, setAutoPowerSlider] = useState("back");
-  const [cda, setCda] = useState(0.255);
+  const [cda, setCda] = useState(0.23);
   const [riderMass, setRiderMass] = useState(70);
   const [bikeMass, setBikeMass] = useState(9);
   const [windKph, setWindKph] = useState(23);
