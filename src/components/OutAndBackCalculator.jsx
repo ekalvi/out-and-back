@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Wind, Clock, Gauge, ArrowRight, ChevronDown, Sparkles } from "lucide-react";
 import {
   solveSpeedFromPower,
@@ -146,8 +146,13 @@ export default function OutAndBackCalculator({ commitSha }) {
     }
   };
 
+  // Only sync state to the URL hash if the page was loaded with one (i.e. via
+  // a share link). Otherwise the hash stays absent so the URL is clean.
+  const syncHashRef = useRef(false);
+
   useEffect(() => {
     if (typeof window === "undefined" || !window.location.hash) return;
+    syncHashRef.current = true;
     const decoded = decodeStateFromHash(window.location.hash);
     applyState(decoded);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -155,6 +160,7 @@ export default function OutAndBackCalculator({ commitSha }) {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+    if (!syncHashRef.current) return;
     const hash = encodeStateToHash({
       distance, vOut, vBack, powerOut, powerBack, powerAvg, autoPowerSlider,
       cda, riderMass, bikeMass,
