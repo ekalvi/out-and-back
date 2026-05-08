@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Wind, Clock, Gauge, ArrowRight, ChevronDown } from "lucide-react";
+import { Wind, Clock, Gauge, ArrowRight, ChevronDown, Sparkles } from "lucide-react";
 
 const STATE_KEYS = [
   ["distance", "di", "number"],
@@ -516,8 +516,9 @@ export default function OutAndBackCalculator({ commitSha }) {
                 type="button"
                 onClick={handleOptimize}
                 title="Find the power split that minimizes total time at the current avg power"
-                className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-700 transition hover:border-zinc-300 hover:bg-zinc-50 hover:text-zinc-900"
+                className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-700 transition hover:border-zinc-300 hover:bg-zinc-50 hover:text-zinc-900"
               >
+                <Sparkles className="h-3.5 w-3.5" strokeWidth={2.5} />
                 Optimize split for fastest time
               </button>
             </div>
@@ -657,8 +658,9 @@ export default function OutAndBackCalculator({ commitSha }) {
               <button
                 type="button"
                 onClick={() => setCda(parseFloat(derivedCda.toFixed(3)))}
-                className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-700 transition hover:border-zinc-300 hover:bg-zinc-50 hover:text-zinc-900"
+                className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-700 transition hover:border-zinc-300 hover:bg-zinc-50 hover:text-zinc-900"
               >
+                <Sparkles className="h-3.5 w-3.5" strokeWidth={2.5} />
                 Use derived CdA
               </button>
               <p className="text-[10px] leading-relaxed text-zinc-500">
@@ -896,6 +898,11 @@ function ToggleBtn({ active, onClick, children }) {
 }
 
 function NumberInput({ label, value, onChange, unit, step }) {
+  const [text, setText] = useState(String(value));
+  const [focused, setFocused] = useState(false);
+  useEffect(() => {
+    if (!focused) setText(String(value));
+  }, [value, focused]);
   return (
     <div>
       <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
@@ -904,10 +911,19 @@ function NumberInput({ label, value, onChange, unit, step }) {
       <div className="relative">
         <input
           type="number"
-          value={value}
+          value={text}
           step={step}
+          onFocus={() => setFocused(true)}
+          onBlur={() => {
+            setFocused(false);
+            const v = parseFloat(text);
+            if (isNaN(v)) setText(String(value));
+            else if (v !== value) onChange(v);
+          }}
           onChange={(e) => {
-            const v = parseFloat(e.target.value);
+            const next = e.target.value;
+            setText(next);
+            const v = parseFloat(next);
             if (!isNaN(v)) onChange(v);
           }}
           className="mono w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2.5 pr-12 text-base font-medium text-zinc-950 transition-all hover:border-zinc-300 focus:border-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-900/15"
