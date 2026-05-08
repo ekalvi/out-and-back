@@ -49,3 +49,7 @@ npm run deploy   # vite build + wrangler deploy
 - Vitest 3 for unit tests
 - Geist Sans / Geist Mono (loaded from Google Fonts at runtime)
 - Cloudflare Workers static assets, custom domain `outback.q5m.io`
+
+## Credits
+
+Power model adapted from Gaelen Merritt's [`gmerritt123/ttt_model`](https://github.com/gmerritt123/ttt_model/).
