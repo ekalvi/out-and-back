@@ -398,14 +398,16 @@ export default function OutAndBackCalculator({ commitSha }) {
         </Num>
       </div>
 
-      <div className="mt-4 grid grid-cols-[1fr_auto] items-center gap-4">
-        <div className="grid grid-cols-2 gap-x-3 gap-y-3">
+      <div className="mt-4 grid grid-cols-1 items-center gap-4 sm:grid-cols-[1fr_auto]">
+        <div className="grid grid-cols-1 gap-x-3 gap-y-3 sm:grid-cols-2">
           <NumberInput label="Distance" value={distance} onChange={setDistance} unit="km" step={0.1} />
           <SliderInput label="Heading" value={courseHeading} onChange={setCourseHeading} min={0} max={360} step={5} unit="°" />
           <SliderInput label="Wind speed" value={windKph} onChange={setWindKph} min={0} max={50} step={0.5} unit="kph" />
           <SliderInput label="Wind from" value={windAngle} onChange={setWindAngle} min={0} max={360} step={5} unit="°" />
         </div>
-        <WindCompass courseHeadingDeg={courseHeading} windAngleDeg={windAngle} hasWind={windKph > 0.05} />
+        <div className="flex justify-center sm:block">
+          <WindCompass courseHeadingDeg={courseHeading} windAngleDeg={windAngle} hasWind={windKph > 0.05} />
+        </div>
       </div>
 
       <div className="relative mt-5">
@@ -888,6 +890,12 @@ function NumberInput({ label, value, onChange, unit, step }) {
 function SliderInput({ label, value, onChange, min, max, step, unit, disabled = false }) {
   const pct = max === min ? 0 : ((value - min) / (max - min)) * 100;
   const clampedPct = Math.max(0, Math.min(100, pct));
+  const [text, setText] = useState(String(value));
+  const [focused, setFocused] = useState(false);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (!focused) setText(String(value));
+  }, [value, focused]);
   return (
     <div className={disabled ? "opacity-70" : ""}>
       <label className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
@@ -920,12 +928,21 @@ function SliderInput({ label, value, onChange, min, max, step, unit, disabled = 
         <div className="flex items-center gap-1.5">
           <input
             type="number"
-            value={value}
+            value={text}
             step={step}
             disabled={disabled}
             readOnly={disabled}
+            onFocus={() => setFocused(true)}
+            onBlur={() => {
+              setFocused(false);
+              const v = parseFloat(text);
+              if (isNaN(v)) setText(String(value));
+              else if (v !== value) onChange(v);
+            }}
             onChange={(e) => {
-              const v = parseFloat(e.target.value);
+              const next = e.target.value;
+              setText(next);
+              const v = parseFloat(next);
               if (!isNaN(v)) onChange(v);
             }}
             className={
