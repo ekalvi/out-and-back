@@ -136,6 +136,22 @@ function impliedCdAFromSplits({ vOutKph, vBackKph, pOut, pBack, vhwParallelMs, g
   return (lo + hi) / 2;
 }
 
+function impliedWindSpeedFromSplits({ vOutKph, vBackKph, pOut, pBack, factor, relAngleRad, gradeOut, gradeBack, physics }) {
+  const targetDelta = vBackKph - vOutKph;
+  const cosRel = Math.cos(relAngleRad);
+  let lo = 0, hi = 100;
+  for (let i = 0; i < 60; i++) {
+    const wKph = (lo + hi) / 2;
+    const vhwMs = (wKph / 3.6) * factor * cosRel;
+    const predOut = solveSpeedFromPower({ ...physics, power: pOut, vhwMs: +vhwMs, gradePct: gradeOut }) * 3.6;
+    const predBack = solveSpeedFromPower({ ...physics, power: pBack, vhwMs: -vhwMs, gradePct: gradeBack }) * 3.6;
+    const predDelta = predBack - predOut;
+    if (predDelta < targetDelta) lo = wKph;
+    else hi = wKph;
+  }
+  return (lo + hi) / 2;
+}
+
 function optimizePowerSplit({ targetAvg, physics, vhwOutMs, vhwBackMs, gradeOut, gradeBack, distance }) {
   const timeAt = (powerOut) => {
     const powerBack = findPowerForAvg({
@@ -309,6 +325,15 @@ export default function OutAndBackCalculator({ commitSha }) {
     vhwParallelMs: windParallelMs,
     gradeOut, gradeBack,
     physics: { mass: totalMass, crr, lossDtPct: lossDt, rho, draft },
+  });
+
+  // Derived wind speed: solve for windKph such that predicted Δv matches observed Δv.
+  const derivedWindKph = impliedWindSpeedFromSplits({
+    vOutKph: vOut, vBackKph: vBack,
+    pOut: displayedOut, pBack: displayedBack,
+    factor: windFactor, relAngleRad,
+    gradeOut, gradeBack,
+    physics: { cda, mass: totalMass, crr, lossDtPct: lossDt, rho, draft },
   });
 
   const pAvg = (2 * pOut * pBack) / (pOut + pBack);
@@ -659,8 +684,22 @@ export default function OutAndBackCalculator({ commitSha }) {
                 <Sparkles className="h-3.5 w-3.5" strokeWidth={2.5} />
                 Use derived CdA
               </button>
+              <div className="flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5">
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-amber-800">Derived wind speed</span>
+                <Num className="text-base font-semibold text-amber-900">
+                  {derivedWindKph.toFixed(1)} <span className="text-xs font-normal text-amber-700">kph</span>
+                </Num>
+              </div>
+              <button
+                type="button"
+                onClick={() => setWindKph(parseFloat(derivedWindKph.toFixed(1)))}
+                className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-700 transition hover:border-zinc-300 hover:bg-zinc-50 hover:text-zinc-900"
+              >
+                <Sparkles className="h-3.5 w-3.5" strokeWidth={2.5} />
+                Use derived wind speed
+              </button>
               <p className="text-[10px] leading-relaxed text-zinc-500">
-                Enter your actual leg speeds to back-solve CdA from this ride. Click "Use derived CdA" to seed the CdA input above. If the derived value seems unreasonable, adjust Wind factor in Advanced.
+                Enter your actual leg speeds to back-solve. Derived CdA matches the average speed; derived wind speed matches the speed delta between legs. If wind speed pegs to 0 or 100, your observed Δv can't be explained by wind alone — check that course heading and wind direction reflect your ride.
               </p>
             </div>
       </div>
