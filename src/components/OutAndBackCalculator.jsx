@@ -151,29 +151,16 @@ export default function OutAndBackCalculator({ commitSha }) {
     }
   };
 
+  // Use the URL hash only to seed initial state, then strip it. Share links
+  // are built on demand in handleShare; we never write the hash back to the
+  // address bar.
   useEffect(() => {
     if (typeof window === "undefined" || !window.location.hash) return;
     const decoded = decodeStateFromHash(window.location.hash);
     applyState(decoded);
+    window.history.replaceState(null, "", window.location.pathname + window.location.search);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const hash = encodeStateToHash({
-      mode, distance, vOut, vBack, powerOut, powerBack, powerAvg, autoPowerSlider,
-      cda, riderMass, bikeMass,
-      windKph, windFactorPct, windAngle, courseHeading,
-      grade, crr, lossDt, rho, draft,
-    });
-    const url = `${window.location.pathname}${window.location.search}${hash ? "#" + hash : ""}`;
-    window.history.replaceState(null, "", url);
-  }, [
-    mode, distance, vOut, vBack, powerOut, powerBack, powerAvg, autoPowerSlider,
-    cda, riderMass, bikeMass,
-    windKph, windFactorPct, windAngle, courseHeading,
-    grade, crr, lossDt, rho, draft,
-  ]);
 
   const isSplit = mode === "splits";
   const totalMass = riderMass + bikeMass;
@@ -268,11 +255,16 @@ export default function OutAndBackCalculator({ commitSha }) {
   const formatTime = (mins) => {
     if (!isFinite(mins) || mins < 0) return "—:——.—";
     const totalTenths = Math.round(mins * 600);
-    const m = Math.floor(totalTenths / 600);
-    const remaining = totalTenths - m * 600;
+    const totalMins = Math.floor(totalTenths / 600);
+    const remaining = totalTenths - totalMins * 600;
     const s = Math.floor(remaining / 10);
     const tenths = remaining - s * 10;
-    return `${m}:${s.toString().padStart(2, "0")}.${tenths}`;
+    if (totalMins >= 60) {
+      const h = Math.floor(totalMins / 60);
+      const m = totalMins - h * 60;
+      return `${h}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}.${tenths}`;
+    }
+    return `${totalMins}:${s.toString().padStart(2, "0")}.${tenths}`;
   };
 
   const sliderPct = (Math.min(15, derivedDeltaV) / 15) * 100;
@@ -348,7 +340,9 @@ export default function OutAndBackCalculator({ commitSha }) {
   function handleLoadPreset(name) {
     const preset = presets.find((p) => p.name === name);
     if (!preset) return;
-    applyState(preset.state);
+    // Presets saved before mode existed lack the key; treat them as splits so
+    // the loaded split-specific fields aren't reinterpreted under p2p semantics.
+    applyState({ mode: "splits", ...preset.state });
   }
 
   function handleDeletePreset(name) {
@@ -361,9 +355,6 @@ export default function OutAndBackCalculator({ commitSha }) {
   function handleReset() {
     if (!window.confirm("Reset all inputs to defaults?")) return;
     applyState(DEFAULTS);
-    if (typeof window !== "undefined" && window.location.hash) {
-      window.history.replaceState(null, "", window.location.pathname + window.location.search);
-    }
   }
 
   const penaltyCard = (
