@@ -1030,7 +1030,17 @@ function Footer({ commitSha }) {
   return (
     <footer className="mt-10 border-t border-zinc-200 pt-5">
       <div className="flex items-center justify-between text-[11px] font-medium uppercase tracking-wider text-zinc-500">
-        <span>outback.q5m.io</span>
+        <span>
+          Made in Canada 🇨🇦 by{" "}
+          <a
+            href="https://github.com/ekalvi"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="transition hover:text-zinc-900"
+          >
+            ekalvi
+          </a>
+        </span>
         <span className="flex items-center gap-3">
           <span className="flex items-center gap-1.5">
             <svg
