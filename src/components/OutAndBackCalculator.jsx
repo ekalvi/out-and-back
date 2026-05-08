@@ -465,14 +465,7 @@ export default function OutAndBackCalculator({ commitSha }) {
 
   const penaltyCard = (
     <Card className="mb-4">
-      <div className="flex items-baseline justify-between">
-        <Eyebrow>Penalty vs flat &amp; calm</Eyebrow>
-        <Num className="text-[11px] text-zinc-500">
-          no-wind @ {data.base.toFixed(2)} kph
-        </Num>
-      </div>
-
-      <div className="mt-5 grid grid-cols-2 gap-6 sm:gap-10">
+      <div className="grid grid-cols-2 gap-6 sm:gap-10">
         <div>
           <div className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider text-emerald-700">
             <Clock className="h-3 w-3" strokeWidth={2.5} /> Ideal
@@ -480,7 +473,7 @@ export default function OutAndBackCalculator({ commitSha }) {
           <Num className="mt-2 block text-4xl font-bold tracking-tight text-emerald-700 sm:text-5xl">
             {formatTime(data.tBase)}
           </Num>
-          <Num className="mt-1.5 block text-xs text-zinc-500">
+          <Num className="mt-1.5 block text-sm font-medium text-emerald-700/80">
             {data.base.toFixed(2)} kph
           </Num>
         </div>
@@ -491,8 +484,8 @@ export default function OutAndBackCalculator({ commitSha }) {
           <Num className="mt-2 block text-4xl font-bold tracking-tight text-rose-700 sm:text-5xl">
             {formatTime(data.tAct)}
           </Num>
-          <Num className="mt-1.5 block text-xs text-zinc-500">
-            {data.vAvg.toFixed(2)} kph avg
+          <Num className="mt-1.5 block text-sm font-medium text-rose-700/80">
+            {data.vAvg.toFixed(2)} kph
           </Num>
         </div>
       </div>
@@ -774,16 +767,10 @@ export default function OutAndBackCalculator({ commitSha }) {
               <img src="/favicon.svg" alt="" aria-hidden="true" className="h-4 w-4" />
               Out and Back
             </span>
-            <span className="text-[11px] font-medium uppercase tracking-wider text-zinc-500">
-              TT split calculator
-            </span>
           </div>
           <h1 className="text-4xl font-bold tracking-tight text-zinc-950 sm:text-5xl">
-            Asymmetric split penalty
+            TT Split Calculator
           </h1>
-          <p className="mt-2 text-sm text-zinc-500">
-            Wind makes your two legs unequal. Average speed becomes the harmonic mean — and you always lose time vs. the no-wind ideal.
-          </p>
         </header>
 
         <div className="mb-5 flex flex-wrap items-center justify-end gap-3">
@@ -1136,13 +1123,13 @@ function WindCompass({ courseHeadingDeg, windAngleDeg, hasWind }) {
 
 function PenaltyBlock({ icon, label, value, unit }) {
   return (
-    <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3.5">
+    <div>
       <div className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
         {icon} {label}
       </div>
-      <div className="mt-1.5 flex items-baseline gap-1">
-        <Num className="text-2xl font-semibold text-rose-700">{value}</Num>
-        <Num className="text-xs text-zinc-500">{unit}</Num>
+      <div className="mt-1 flex items-baseline gap-1">
+        <Num className="text-base font-semibold text-zinc-700">{value}</Num>
+        <Num className="text-[11px] text-zinc-500">{unit}</Num>
       </div>
     </div>
   );
