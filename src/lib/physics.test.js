@@ -113,6 +113,25 @@ describe("impliedWindSpeedFromSplits", () => {
     });
     expect(recovered).toBeCloseTo(trueWindKph, 1);
   });
+
+  it("recovers the wind speed when wind aligns with the back leg (cosRel < 0)", () => {
+    // Wind coming from behind the start = tailwind on out, headwind on back.
+    // Bisection direction has to flip; the un-flipped version drives away
+    // from the root and returns wildly inflated speeds.
+    const trueWindKph = 18;
+    const factor = 0.7;
+    const relAngleRad = (165 * Math.PI) / 180; // cos ≈ -0.966
+    const physics = PHYSICS;
+    const pOut = 250, pBack = 250;
+    const vhwMs = (trueWindKph / 3.6) * factor * Math.cos(relAngleRad);
+    const vOutKph = solveSpeedFromPower({ ...physics, power: pOut, vhwMs: +vhwMs, gradePct: 0 }) * 3.6;
+    const vBackKph = solveSpeedFromPower({ ...physics, power: pBack, vhwMs: -vhwMs, gradePct: 0 }) * 3.6;
+    const recovered = impliedWindSpeedFromSplits({
+      vOutKph, vBackKph, pOut, pBack, factor, relAngleRad,
+      gradeOut: 0, gradeBack: 0, physics,
+    });
+    expect(recovered).toBeCloseTo(trueWindKph, 1);
+  });
 });
 
 describe("optimizePowerSplit", () => {

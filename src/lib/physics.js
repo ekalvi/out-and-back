@@ -102,6 +102,10 @@ export function impliedCdAFromSplits({ vOutKph, vBackKph, pOut, pBack, vhwParall
 export function impliedWindSpeedFromSplits({ vOutKph, vBackKph, pOut, pBack, factor, relAngleRad, gradeOut, gradeBack, physics }) {
   const targetDelta = vBackKph - vOutKph;
   const cosRel = Math.cos(relAngleRad);
+  // predDelta is monotonically increasing in wKph when cosRel > 0 (headwind on
+  // the out leg) and monotonically decreasing when cosRel < 0 (tailwind on the
+  // out leg). Flip the comparison sign so the bisection converges either way.
+  const sign = cosRel >= 0 ? 1 : -1;
   let lo = 0, hi = 100;
   for (let i = 0; i < 60; i++) {
     const wKph = (lo + hi) / 2;
@@ -109,7 +113,7 @@ export function impliedWindSpeedFromSplits({ vOutKph, vBackKph, pOut, pBack, fac
     const predOut = solveSpeedFromPower({ ...physics, power: pOut, vhwMs: +vhwMs, gradePct: gradeOut }) * 3.6;
     const predBack = solveSpeedFromPower({ ...physics, power: pBack, vhwMs: -vhwMs, gradePct: gradeBack }) * 3.6;
     const predDelta = predBack - predOut;
-    if (predDelta < targetDelta) lo = wKph;
+    if (sign * predDelta < sign * targetDelta) lo = wKph;
     else hi = wKph;
   }
   return (lo + hi) / 2;
