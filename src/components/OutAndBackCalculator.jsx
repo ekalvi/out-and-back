@@ -175,7 +175,6 @@ export default function OutAndBackCalculator({ commitSha }) {
   const effectiveWindKph = windKph * windFactor;
   const relAngleRad = ((windAngle - courseHeading) * Math.PI) / 180;
   const windParallelKph = effectiveWindKph * Math.cos(relAngleRad);
-  const windCrossKph = Math.abs(effectiveWindKph * Math.sin(relAngleRad));
   const windParallelMs = windParallelKph / 3.6;
 
   const vhwOutMs = +windParallelMs;
@@ -844,6 +843,10 @@ function NumberInput({ label, value, onChange, unit, step }) {
   const [text, setText] = useState(String(value));
   const [focused, setFocused] = useState(false);
   useEffect(() => {
+    // Sync external value into the local input draft only when the field isn't
+    // being edited, so programmatic updates (presets, optimizer) don't fight
+    // user typing.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (!focused) setText(String(value));
   }, [value, focused]);
   return (
