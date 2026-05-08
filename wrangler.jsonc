@@ -3,7 +3,7 @@
   "name": "out-and-back",
   "compatibility_date": "2026-05-07",
   "workers_dev": false,
-  "preview_urls": false,
+  "preview_urls": true,
   "routes": [
     { "pattern": "outback.q5m.io", "custom_domain": true }
   ],

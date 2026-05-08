@@ -643,10 +643,13 @@ export default function OutAndBackCalculator({ commitSha }) {
       <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6 sm:py-12 lg:py-16">
         <header className="mb-8">
           <div className="mb-3 flex items-center justify-between">
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-[11px] font-medium uppercase tracking-wider text-zinc-600">
+            <a
+              href="/"
+              className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-[11px] font-medium uppercase tracking-wider text-zinc-600 transition hover:border-zinc-300 hover:text-zinc-900"
+            >
               <img src="/favicon.svg" alt="" aria-hidden="true" className="h-4 w-4" />
               Out and Back
-            </span>
+            </a>
           </div>
           <h1 className="text-4xl font-bold tracking-tight text-zinc-950 sm:text-5xl">
             TT Split Calculator
@@ -1027,7 +1030,17 @@ function Footer({ commitSha }) {
   return (
     <footer className="mt-10 border-t border-zinc-200 pt-5">
       <div className="flex items-center justify-between text-[11px] font-medium uppercase tracking-wider text-zinc-500">
-        <span>outback.q5m.io</span>
+        <span>
+          Made in Canada 🇨🇦 by{" "}
+          <a
+            href="https://github.com/ekalvi"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="transition hover:text-zinc-900"
+          >
+            ekalvi
+          </a>
+        </span>
         <span className="flex items-center gap-3">
           <span className="flex items-center gap-1.5">
             <svg
