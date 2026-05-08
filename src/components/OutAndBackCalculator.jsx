@@ -187,27 +187,49 @@ function findPowerForAvg({ targetAvg, fixedPower, fixedLeg, physics, vhwOutMs, v
   return (lo + hi) / 2;
 }
 
-export default function OutAndBackCalculator({ commitSha }) {
-  const [distance, setDistance] = useState(14.10);
-  const [vOut, setVOut] = useState(36.3);
-  const [vBack, setVBack] = useState(50.2);
+const DEFAULTS = {
+  distance: 16.00,
+  vOut: 34.0,
+  vBack: 46.4,
+  powerOut: 250,
+  powerBack: 250,
+  powerAvg: 250,
+  autoPowerSlider: "back",
+  cda: 0.25,
+  riderMass: 75,
+  bikeMass: 9,
+  windKph: 15,
+  windFactorPct: 70,
+  windAngle: 20,
+  courseHeading: 0,
+  grade: 0,
+  crr: 0.004,
+  lossDt: 2,
+  rho: 1.225,
+  draft: 1.0,
+};
 
-  const [powerOut, setPowerOut] = useState(298);
-  const [powerBack, setPowerBack] = useState(319);
-  const [powerAvg, setPowerAvg] = useState(305);
-  const [autoPowerSlider, setAutoPowerSlider] = useState("back");
-  const [cda, setCda] = useState(0.23);
-  const [riderMass, setRiderMass] = useState(75);
-  const [bikeMass, setBikeMass] = useState(9);
-  const [windKph, setWindKph] = useState(23);
-  const [windFactorPct, setWindFactorPct] = useState(70);
-  const [windAngle, setWindAngle] = useState(12);
-  const [courseHeading, setCourseHeading] = useState(315);
-  const [grade, setGrade] = useState(0);
-  const [crr, setCrr] = useState(0.004);
-  const [lossDt, setLossDt] = useState(2);
-  const [rho, setRho] = useState(1.225);
-  const [draft, setDraft] = useState(1.0);
+export default function OutAndBackCalculator({ commitSha }) {
+  const [distance, setDistance] = useState(DEFAULTS.distance);
+  const [vOut, setVOut] = useState(DEFAULTS.vOut);
+  const [vBack, setVBack] = useState(DEFAULTS.vBack);
+
+  const [powerOut, setPowerOut] = useState(DEFAULTS.powerOut);
+  const [powerBack, setPowerBack] = useState(DEFAULTS.powerBack);
+  const [powerAvg, setPowerAvg] = useState(DEFAULTS.powerAvg);
+  const [autoPowerSlider, setAutoPowerSlider] = useState(DEFAULTS.autoPowerSlider);
+  const [cda, setCda] = useState(DEFAULTS.cda);
+  const [riderMass, setRiderMass] = useState(DEFAULTS.riderMass);
+  const [bikeMass, setBikeMass] = useState(DEFAULTS.bikeMass);
+  const [windKph, setWindKph] = useState(DEFAULTS.windKph);
+  const [windFactorPct, setWindFactorPct] = useState(DEFAULTS.windFactorPct);
+  const [windAngle, setWindAngle] = useState(DEFAULTS.windAngle);
+  const [courseHeading, setCourseHeading] = useState(DEFAULTS.courseHeading);
+  const [grade, setGrade] = useState(DEFAULTS.grade);
+  const [crr, setCrr] = useState(DEFAULTS.crr);
+  const [lossDt, setLossDt] = useState(DEFAULTS.lossDt);
+  const [rho, setRho] = useState(DEFAULTS.rho);
+  const [draft, setDraft] = useState(DEFAULTS.draft);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
   const [presets, setPresets] = useState(() => {
@@ -384,6 +406,14 @@ export default function OutAndBackCalculator({ commitSha }) {
     const next = presets.filter((p) => p.name !== name);
     setPresets(next);
     window.localStorage.setItem("outback:presets", JSON.stringify(next));
+  }
+
+  function handleReset() {
+    if (!window.confirm("Reset all inputs to defaults?")) return;
+    applyState(DEFAULTS);
+    if (typeof window !== "undefined" && window.location.hash) {
+      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    }
   }
 
   const penaltyCard = (
@@ -739,6 +769,16 @@ export default function OutAndBackCalculator({ commitSha }) {
             />
             <button
               type="button"
+              onClick={handleReset}
+              title="Reset to defaults"
+              aria-label="Reset to defaults"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-700 transition hover:border-zinc-300 hover:text-zinc-900"
+            >
+              <ResetIcon className="h-4 w-4" />
+              <span className="hidden sm:inline">Reset</span>
+            </button>
+            <button
+              type="button"
               onClick={handleShare}
               title={shareCopied ? "Copied to clipboard" : "Copy share link"}
               aria-label="Share"
@@ -822,6 +862,14 @@ function BookmarkIcon({ className = "h-4 w-4" }) {
   return (
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className={className} aria-hidden="true">
       <path fillRule="evenodd" d="M10 2c-1.716 0-3.408.106-5.07.31C3.806 2.45 3 3.414 3 4.517V17.25a.75.75 0 0 0 1.075.676L10 15.082l5.925 2.844A.75.75 0 0 0 17 17.25V4.517c0-1.103-.806-2.068-1.93-2.207A41.403 41.403 0 0 0 10 2Z" clipRule="evenodd" />
+    </svg>
+  );
+}
+
+function ResetIcon({ className = "h-4 w-4" }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className={className} aria-hidden="true">
+      <path fillRule="evenodd" d="M15.312 11.424a5.5 5.5 0 0 1-9.201 2.466l-.312-.311h2.433a.75.75 0 0 0 0-1.5H3.989a.75.75 0 0 0-.75.75v4.242a.75.75 0 0 0 1.5 0v-2.43l.31.31a7 7 0 0 0 11.712-3.138.75.75 0 0 0-1.449-.39Zm1.23-3.723a.75.75 0 0 0 .219-.53V2.929a.75.75 0 0 0-1.5 0V5.36l-.31-.31A7 7 0 0 0 3.239 8.188a.75.75 0 1 0 1.448.389A5.5 5.5 0 0 1 13.89 6.11l.311.31h-2.432a.75.75 0 0 0 0 1.5h4.243a.75.75 0 0 0 .53-.219Z" clipRule="evenodd" />
     </svg>
   );
 }
