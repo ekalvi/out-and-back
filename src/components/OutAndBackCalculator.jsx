@@ -153,6 +153,23 @@ export default function OutAndBackCalculator({ commitSha }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const hash = encodeStateToHash({
+      distance, vOut, vBack, powerOut, powerBack, powerAvg, autoPowerSlider,
+      cda, riderMass, bikeMass,
+      windKph, windFactorPct, windAngle, courseHeading,
+      grade, crr, lossDt, rho, draft,
+    });
+    const url = `${window.location.pathname}${window.location.search}${hash ? "#" + hash : ""}`;
+    window.history.replaceState(null, "", url);
+  }, [
+    distance, vOut, vBack, powerOut, powerBack, powerAvg, autoPowerSlider,
+    cda, riderMass, bikeMass,
+    windKph, windFactorPct, windAngle, courseHeading,
+    grade, crr, lossDt, rho, draft,
+  ]);
+
   const totalMass = riderMass + bikeMass;
   const windFactor = windFactorPct / 100;
   const effectiveWindKph = windKph * windFactor;
