@@ -99,6 +99,17 @@ export function impliedCdAFromSplits({ vOutKph, vBackKph, pOut, pBack, vhwParall
   return (lo + hi) / 2;
 }
 
+export function impliedCdAFromSingleSpeed({ vKph, power, vhwMs, gradePct, physics }) {
+  let lo = 0.05, hi = 0.80;
+  for (let i = 0; i < 60; i++) {
+    const cdaTry = (lo + hi) / 2;
+    const predKph = solveSpeedFromPower({ ...physics, cda: cdaTry, power, vhwMs, gradePct }) * 3.6;
+    if (predKph > vKph) lo = cdaTry;
+    else hi = cdaTry;
+  }
+  return (lo + hi) / 2;
+}
+
 export function impliedWindSpeedFromSplits({ vOutKph, vBackKph, pOut, pBack, factor, relAngleRad, gradeOut, gradeBack, physics }) {
   const targetDelta = vBackKph - vOutKph;
   const cosRel = Math.cos(relAngleRad);

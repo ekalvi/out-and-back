@@ -6,11 +6,13 @@ import {
   findPowerBackForAvgSpeed,
   bisectPowerForAbsDeltaV,
   impliedCdAFromSplits,
+  impliedCdAFromSingleSpeed,
   impliedWindSpeedFromSplits,
   optimizePowerSplit,
 } from "../lib/physics.js";
 
 const STATE_KEYS = [
+  ["mode", "md", "string"],
   ["distance", "di", "number"],
   ["vOut", "vo", "number"],
   ["vBack", "vb", "number"],
@@ -79,6 +81,7 @@ function legBackground(parallelHeadKph) {
 }
 
 const DEFAULTS = {
+  mode: "splits",
   distance: 16.00,
   vOut: 34.0,
   vBack: 46.4,
@@ -101,6 +104,7 @@ const DEFAULTS = {
 };
 
 export default function OutAndBackCalculator({ commitSha }) {
+  const [mode, setMode] = useState(DEFAULTS.mode);
   const [distance, setDistance] = useState(DEFAULTS.distance);
   const [vOut, setVOut] = useState(DEFAULTS.vOut);
   const [vBack, setVBack] = useState(DEFAULTS.vBack);
@@ -130,6 +134,7 @@ export default function OutAndBackCalculator({ commitSha }) {
   });
 
   const SETTERS = {
+    mode: setMode,
     distance: setDistance,
     vOut: setVOut, vBack: setVBack,
     powerOut: setPowerOut, powerBack: setPowerBack, powerAvg: setPowerAvg,
@@ -156,7 +161,7 @@ export default function OutAndBackCalculator({ commitSha }) {
   useEffect(() => {
     if (typeof window === "undefined") return;
     const hash = encodeStateToHash({
-      distance, vOut, vBack, powerOut, powerBack, powerAvg, autoPowerSlider,
+      mode, distance, vOut, vBack, powerOut, powerBack, powerAvg, autoPowerSlider,
       cda, riderMass, bikeMass,
       windKph, windFactorPct, windAngle, courseHeading,
       grade, crr, lossDt, rho, draft,
@@ -164,12 +169,13 @@ export default function OutAndBackCalculator({ commitSha }) {
     const url = `${window.location.pathname}${window.location.search}${hash ? "#" + hash : ""}`;
     window.history.replaceState(null, "", url);
   }, [
-    distance, vOut, vBack, powerOut, powerBack, powerAvg, autoPowerSlider,
+    mode, distance, vOut, vBack, powerOut, powerBack, powerAvg, autoPowerSlider,
     cda, riderMass, bikeMass,
     windKph, windFactorPct, windAngle, courseHeading,
     grade, crr, lossDt, rho, draft,
   ]);
 
+  const isSplit = mode === "splits";
   const totalMass = riderMass + bikeMass;
   const windFactor = windFactorPct / 100;
   const effectiveWindKph = windKph * windFactor;
@@ -188,46 +194,63 @@ export default function OutAndBackCalculator({ commitSha }) {
   let displayedBack = powerBack;
   let displayedAvg = powerAvg;
 
-  if (autoPowerSlider === "out") {
-    displayedOut = findPowerForAvg({
-      targetAvg: powerAvg, fixedPower: powerBack, fixedLeg: "back",
-      physics: physicsBase, vhwOutMs, vhwBackMs, gradeOut, gradeBack,
-    });
-  } else if (autoPowerSlider === "back") {
-    displayedBack = findPowerForAvg({
-      targetAvg: powerAvg, fixedPower: powerOut, fixedLeg: "out",
-      physics: physicsBase, vhwOutMs, vhwBackMs, gradeOut, gradeBack,
-    });
+  if (isSplit) {
+    if (autoPowerSlider === "out") {
+      displayedOut = findPowerForAvg({
+        targetAvg: powerAvg, fixedPower: powerBack, fixedLeg: "back",
+        physics: physicsBase, vhwOutMs, vhwBackMs, gradeOut, gradeBack,
+      });
+    } else if (autoPowerSlider === "back") {
+      displayedBack = findPowerForAvg({
+        targetAvg: powerAvg, fixedPower: powerOut, fixedLeg: "out",
+        physics: physicsBase, vhwOutMs, vhwBackMs, gradeOut, gradeBack,
+      });
+    }
+  } else {
+    // Point-to-point: single leg, single power. Avg power == leg power.
+    displayedOut = powerAvg;
+    displayedBack = powerAvg;
+    displayedAvg = powerAvg;
   }
 
   const pOutMs = solveSpeedFromPower({ ...physicsBase, power: displayedOut, vhwMs: vhwOutMs, gradePct: gradeOut });
-  const pBackMs = solveSpeedFromPower({ ...physicsBase, power: displayedBack, vhwMs: vhwBackMs, gradePct: gradeBack });
+  const pBackMs = isSplit
+    ? solveSpeedFromPower({ ...physicsBase, power: displayedBack, vhwMs: vhwBackMs, gradePct: gradeBack })
+    : pOutMs;
   const pOut = pOutMs * 3.6;
   const pBack = pBackMs * 3.6;
 
-  if (autoPowerSlider === "avg") {
+  if (isSplit && autoPowerSlider === "avg") {
     displayedAvg = (displayedOut / pOut + displayedBack / pBack) / (1 / pOut + 1 / pBack);
   }
 
   // Calibration helper (always computed): given observed splits, what CdA fits?
-  const derivedCda = impliedCdAFromSplits({
-    vOutKph: vOut, vBackKph: vBack,
-    pOut: displayedOut, pBack: displayedBack,
-    vhwParallelMs: windParallelMs,
-    gradeOut, gradeBack,
-    physics: { mass: totalMass, crr, lossDtPct: lossDt, rho, draft },
-  });
+  const derivedCda = isSplit
+    ? impliedCdAFromSplits({
+        vOutKph: vOut, vBackKph: vBack,
+        pOut: displayedOut, pBack: displayedBack,
+        vhwParallelMs: windParallelMs,
+        gradeOut, gradeBack,
+        physics: { mass: totalMass, crr, lossDtPct: lossDt, rho, draft },
+      })
+    : impliedCdAFromSingleSpeed({
+        vKph: vOut, power: displayedOut,
+        vhwMs: vhwOutMs, gradePct: gradeOut,
+        physics: { mass: totalMass, crr, lossDtPct: lossDt, rho, draft },
+      });
 
-  // Derived wind speed: solve for windKph such that predicted Δv matches observed Δv.
-  const derivedWindKph = impliedWindSpeedFromSplits({
-    vOutKph: vOut, vBackKph: vBack,
-    pOut: displayedOut, pBack: displayedBack,
-    factor: windFactor, relAngleRad,
-    gradeOut, gradeBack,
-    physics: { cda, mass: totalMass, crr, lossDtPct: lossDt, rho, draft },
-  });
+  // Derived wind speed: only meaningful from splits asymmetry.
+  const derivedWindKph = isSplit
+    ? impliedWindSpeedFromSplits({
+        vOutKph: vOut, vBackKph: vBack,
+        pOut: displayedOut, pBack: displayedBack,
+        factor: windFactor, relAngleRad,
+        gradeOut, gradeBack,
+        physics: { cda, mass: totalMass, crr, lossDtPct: lossDt, rho, draft },
+      })
+    : 0;
 
-  const pAvg = (2 * pOut * pBack) / (pOut + pBack);
+  const pAvg = isSplit ? (2 * pOut * pBack) / (pOut + pBack) : pOut;
   const pIdealMs = solveSpeedFromPower({ ...physicsBase, power: displayedAvg, vhwMs: 0, gradePct: 0 });
   const pIdealAvg = pIdealMs * 3.6;
   const pDvAvg = pIdealAvg - pAvg;
@@ -296,7 +319,7 @@ export default function OutAndBackCalculator({ commitSha }) {
 
   function getCurrentState() {
     return {
-      distance, vOut, vBack,
+      mode, distance, vOut, vBack,
       powerOut, powerBack, powerAvg, autoPowerSlider,
       cda, riderMass, bikeMass,
       windKph, windFactorPct, windAngle, courseHeading,
@@ -393,9 +416,11 @@ export default function OutAndBackCalculator({ commitSha }) {
     <Card className="mb-4">
       <div className="flex items-baseline justify-between">
         <Eyebrow>Course profile</Eyebrow>
-        <Num className="text-[11px] text-zinc-500">
-          turn at {(distance / 2).toFixed(2)} km
-        </Num>
+        {isSplit && (
+          <Num className="text-[11px] text-zinc-500">
+            turn at {(distance / 2).toFixed(2)} km
+          </Num>
+        )}
       </div>
 
       <div className="mt-4 grid grid-cols-1 items-center gap-4 sm:grid-cols-[1fr_auto]">
@@ -411,32 +436,48 @@ export default function OutAndBackCalculator({ commitSha }) {
       </div>
 
       <div className="relative mt-5">
-        <div className="relative mb-1.5 h-4">
-          <ResetIcon className="absolute left-1/2 top-0 h-4 w-4 -translate-x-1/2 text-zinc-500" />
-        </div>
+        {isSplit && (
+          <div className="relative mb-1.5 h-4">
+            <ResetIcon className="absolute left-1/2 top-0 h-4 w-4 -translate-x-1/2 text-zinc-500" />
+          </div>
+        )}
         <div className="flex h-9 overflow-hidden rounded-lg border border-zinc-200">
-          <div
-            className="flex flex-1 items-center justify-between border-r border-zinc-200 px-3 transition-colors"
-            style={{ backgroundColor: legBackground(+data.headOut) }}
-          >
-            <ArrowRight className="h-3.5 w-3.5 text-zinc-700" strokeWidth={2.5} />
-            <Num className="text-xs font-semibold text-zinc-900">
-              {data.vOut.toFixed(1)} kph
-            </Num>
-          </div>
-          <div
-            className="flex flex-1 items-center justify-between px-3 transition-colors"
-            style={{ backgroundColor: legBackground(-data.headOut) }}
-          >
-            <Num className="text-xs font-semibold text-zinc-900">
-              {data.vBack.toFixed(1)} kph
-            </Num>
-            <ArrowRight className="h-3.5 w-3.5 rotate-180 text-zinc-700" strokeWidth={2.5} />
-          </div>
+          {isSplit ? (
+            <>
+              <div
+                className="flex flex-1 items-center justify-between border-r border-zinc-200 px-3 transition-colors"
+                style={{ backgroundColor: legBackground(+data.headOut) }}
+              >
+                <ArrowRight className="h-3.5 w-3.5 text-zinc-700" strokeWidth={2.5} />
+                <Num className="text-xs font-semibold text-zinc-900">
+                  {data.vOut.toFixed(1)} kph
+                </Num>
+              </div>
+              <div
+                className="flex flex-1 items-center justify-between px-3 transition-colors"
+                style={{ backgroundColor: legBackground(-data.headOut) }}
+              >
+                <Num className="text-xs font-semibold text-zinc-900">
+                  {data.vBack.toFixed(1)} kph
+                </Num>
+                <ArrowRight className="h-3.5 w-3.5 rotate-180 text-zinc-700" strokeWidth={2.5} />
+              </div>
+            </>
+          ) : (
+            <div
+              className="flex flex-1 items-center justify-between px-3 transition-colors"
+              style={{ backgroundColor: legBackground(+data.headOut) }}
+            >
+              <ArrowRight className="h-3.5 w-3.5 text-zinc-700" strokeWidth={2.5} />
+              <Num className="text-xs font-semibold text-zinc-900">
+                {data.vOut.toFixed(1)} kph
+              </Num>
+            </div>
+          )}
         </div>
         <div className="mono mt-1.5 flex justify-between text-[10px] uppercase tracking-wider text-zinc-500">
           <span>start</span>
-          <span className="absolute left-1/2 -translate-x-1/2">turn</span>
+          {isSplit && <span className="absolute left-1/2 -translate-x-1/2">turn</span>}
           <span>finish</span>
         </div>
       </div>
@@ -448,83 +489,99 @@ export default function OutAndBackCalculator({ commitSha }) {
       <Eyebrow>Inputs</Eyebrow>
       <div className="mt-4 space-y-5">
             <div className="space-y-3 rounded-lg border border-zinc-200 bg-zinc-50/60 p-3">
-              <div className="flex items-center justify-between">
-                <Eyebrow>Power · auto-compute</Eyebrow>
-                <div className="flex gap-0.5 rounded-md bg-zinc-200/70 p-0.5">
-                  <ToggleBtn active={autoPowerSlider === "out"} onClick={() => handleAutoChange("out")}>Out</ToggleBtn>
-                  <ToggleBtn active={autoPowerSlider === "back"} onClick={() => handleAutoChange("back")}>Back</ToggleBtn>
-                  <ToggleBtn active={autoPowerSlider === "avg"} onClick={() => handleAutoChange("avg")}>Avg</ToggleBtn>
-                </div>
-              </div>
-              <SliderInput
-                label="Avg power"
-                value={autoPowerSlider === "avg" ? Math.round(displayedAvg) : powerAvg}
-                onChange={setPowerAvg}
-                min={100} max={500} step={5} unit="W"
-                disabled={autoPowerSlider === "avg"}
-              />
-              <SliderInput
-                label="Out leg power"
-                value={autoPowerSlider === "out" ? Math.round(displayedOut) : powerOut}
-                onChange={setPowerOut}
-                min={100} max={500} step={5} unit="W"
-                disabled={autoPowerSlider === "out"}
-              />
-              <SliderInput
-                label="Back leg power"
-                value={autoPowerSlider === "back" ? Math.round(displayedBack) : powerBack}
-                onChange={setPowerBack}
-                min={100} max={500} step={5} unit="W"
-                disabled={autoPowerSlider === "back"}
-              />
-              <button
-                type="button"
-                onClick={handleOptimize}
-                title="Find the power split that minimizes total time at the current avg power"
-                className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-700 transition hover:border-zinc-300 hover:bg-zinc-50 hover:text-zinc-900"
-              >
-                <Sparkles className="h-3.5 w-3.5" strokeWidth={2.5} />
-                Optimize split for fastest time
-              </button>
+              {isSplit ? (
+                <>
+                  <div className="flex items-center justify-between">
+                    <Eyebrow>Power · auto-compute</Eyebrow>
+                    <div className="flex gap-0.5 rounded-md bg-zinc-200/70 p-0.5">
+                      <ToggleBtn active={autoPowerSlider === "out"} onClick={() => handleAutoChange("out")}>Out</ToggleBtn>
+                      <ToggleBtn active={autoPowerSlider === "back"} onClick={() => handleAutoChange("back")}>Back</ToggleBtn>
+                      <ToggleBtn active={autoPowerSlider === "avg"} onClick={() => handleAutoChange("avg")}>Avg</ToggleBtn>
+                    </div>
+                  </div>
+                  <SliderInput
+                    label="Avg power"
+                    value={autoPowerSlider === "avg" ? Math.round(displayedAvg) : powerAvg}
+                    onChange={setPowerAvg}
+                    min={100} max={500} step={5} unit="W"
+                    disabled={autoPowerSlider === "avg"}
+                  />
+                  <SliderInput
+                    label="Out leg power"
+                    value={autoPowerSlider === "out" ? Math.round(displayedOut) : powerOut}
+                    onChange={setPowerOut}
+                    min={100} max={500} step={5} unit="W"
+                    disabled={autoPowerSlider === "out"}
+                  />
+                  <SliderInput
+                    label="Back leg power"
+                    value={autoPowerSlider === "back" ? Math.round(displayedBack) : powerBack}
+                    onChange={setPowerBack}
+                    min={100} max={500} step={5} unit="W"
+                    disabled={autoPowerSlider === "back"}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleOptimize}
+                    title="Find the power split that minimizes total time at the current avg power"
+                    className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-700 transition hover:border-zinc-300 hover:bg-zinc-50 hover:text-zinc-900"
+                  >
+                    <Sparkles className="h-3.5 w-3.5" strokeWidth={2.5} />
+                    Optimize split for fastest time
+                  </button>
+                </>
+              ) : (
+                <>
+                  <Eyebrow>Power</Eyebrow>
+                  <SliderInput
+                    label="Power"
+                    value={powerAvg}
+                    onChange={setPowerAvg}
+                    min={100} max={500} step={5} unit="W"
+                  />
+                </>
+              )}
             </div>
 
-            <div>
-              <div className="mb-2 flex items-baseline justify-between">
-                <label className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
-                  Δv per leg
-                </label>
-                <Num className="text-sm">
-                  <span className="font-semibold text-zinc-950">±{derivedDeltaV.toFixed(1)}</span>
-                  <span className="ml-1 text-zinc-400">kph</span>
-                </Num>
+            {isSplit && (
+              <div>
+                <div className="mb-2 flex items-baseline justify-between">
+                  <label className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+                    Δv per leg
+                  </label>
+                  <Num className="text-sm">
+                    <span className="font-semibold text-zinc-950">±{derivedDeltaV.toFixed(1)}</span>
+                    <span className="ml-1 text-zinc-400">kph</span>
+                  </Num>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="15"
+                  step="0.5"
+                  value={Math.min(15, derivedDeltaV)}
+                  onChange={(e) => applyDeltaV(parseFloat(e.target.value))}
+                  className="slider-thumb h-2 w-full cursor-pointer rounded-full"
+                  style={{
+                    background: `linear-gradient(to right, #18181b 0%, #18181b ${sliderPct}%, #e4e4e7 ${sliderPct}%, #e4e4e7 100%)`,
+                  }}
+                />
+                <div className="mono mt-1.5 flex justify-between text-[10px] text-zinc-400">
+                  <span>0</span>
+                  <span>5</span>
+                  <span>10</span>
+                  <span>15</span>
+                </div>
+                <p className="mt-2 text-[10px] text-zinc-500">Adjusts the power split (out vs back, holding avg) to produce this Δv. Wind/grade unchanged.</p>
               </div>
-              <input
-                type="range"
-                min="0"
-                max="15"
-                step="0.5"
-                value={Math.min(15, derivedDeltaV)}
-                onChange={(e) => applyDeltaV(parseFloat(e.target.value))}
-                className="slider-thumb h-2 w-full cursor-pointer rounded-full"
-                style={{
-                  background: `linear-gradient(to right, #18181b 0%, #18181b ${sliderPct}%, #e4e4e7 ${sliderPct}%, #e4e4e7 100%)`,
-                }}
-              />
-              <div className="mono mt-1.5 flex justify-between text-[10px] text-zinc-400">
-                <span>0</span>
-                <span>5</span>
-                <span>10</span>
-                <span>15</span>
-              </div>
-              <p className="mt-2 text-[10px] text-zinc-500">Adjusts the power split (out vs back, holding avg) to produce this Δv. Wind/grade unchanged.</p>
-            </div>
+            )}
 
             <div className="grid grid-cols-2 gap-3">
               <NumberInput label="CdA" value={cda} onChange={setCda} unit="m²" step={0.005} />
               <NumberInput label="Rider mass" value={riderMass} onChange={setRiderMass} unit="kg" step={0.5} />
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <NumberInput label="Grade (out)" value={grade} onChange={setGrade} unit="%" step={0.1} />
+              <NumberInput label={isSplit ? "Grade (out)" : "Grade"} value={grade} onChange={setGrade} unit="%" step={0.1} />
             </div>
             <button
               type="button"
@@ -563,10 +620,14 @@ export default function OutAndBackCalculator({ commitSha }) {
 
             <div className="space-y-3 rounded-lg border border-zinc-200 bg-zinc-50/60 p-3">
               <Eyebrow>Calibrate from actual ride</Eyebrow>
-              <div className="grid grid-cols-2 gap-3">
-                <NumberInput label="Out leg observed" value={vOut} onChange={setVOut} unit="kph" step={0.1} />
-                <NumberInput label="Back leg observed" value={vBack} onChange={setVBack} unit="kph" step={0.1} />
-              </div>
+              {isSplit ? (
+                <div className="grid grid-cols-2 gap-3">
+                  <NumberInput label="Out leg observed" value={vOut} onChange={setVOut} unit="kph" step={0.1} />
+                  <NumberInput label="Back leg observed" value={vBack} onChange={setVBack} unit="kph" step={0.1} />
+                </div>
+              ) : (
+                <NumberInput label="Speed observed" value={vOut} onChange={setVOut} unit="kph" step={0.1} />
+              )}
               <div className="flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5">
                 <span className="text-[11px] font-semibold uppercase tracking-wider text-amber-800">Derived CdA</span>
                 <Num className="text-base font-semibold text-amber-900">
@@ -581,22 +642,28 @@ export default function OutAndBackCalculator({ commitSha }) {
                 <Sparkles className="h-3.5 w-3.5" strokeWidth={2.5} />
                 Use derived CdA
               </button>
-              <div className="flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5">
-                <span className="text-[11px] font-semibold uppercase tracking-wider text-amber-800">Derived wind speed</span>
-                <Num className="text-base font-semibold text-amber-900">
-                  {derivedWindKph.toFixed(1)} <span className="text-xs font-normal text-amber-700">kph</span>
-                </Num>
-              </div>
-              <button
-                type="button"
-                onClick={() => setWindKph(parseFloat(derivedWindKph.toFixed(1)))}
-                className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-700 transition hover:border-zinc-300 hover:bg-zinc-50 hover:text-zinc-900"
-              >
-                <Sparkles className="h-3.5 w-3.5" strokeWidth={2.5} />
-                Use derived wind speed
-              </button>
+              {isSplit && (
+                <>
+                  <div className="flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5">
+                    <span className="text-[11px] font-semibold uppercase tracking-wider text-amber-800">Derived wind speed</span>
+                    <Num className="text-base font-semibold text-amber-900">
+                      {derivedWindKph.toFixed(1)} <span className="text-xs font-normal text-amber-700">kph</span>
+                    </Num>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setWindKph(parseFloat(derivedWindKph.toFixed(1)))}
+                    className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-700 transition hover:border-zinc-300 hover:bg-zinc-50 hover:text-zinc-900"
+                  >
+                    <Sparkles className="h-3.5 w-3.5" strokeWidth={2.5} />
+                    Use derived wind speed
+                  </button>
+                </>
+              )}
               <p className="text-[10px] leading-relaxed text-zinc-500">
-                Enter your actual leg speeds to back-solve. Derived CdA matches the average speed; derived wind speed matches the speed delta between legs. If wind speed pegs to 0 or 100, your observed Δv can't be explained by wind alone — check that course heading and wind direction reflect your ride.
+                {isSplit
+                  ? "Enter your actual leg speeds to back-solve. Derived CdA matches the average speed; derived wind speed matches the speed delta between legs. If wind speed pegs to 0 or 100, your observed Δv can't be explained by wind alone — check that course heading and wind direction reflect your ride."
+                  : "Enter your actual leg speed to back-solve CdA against this power, wind, and grade. Wind speed can't be back-solved from a single observation — that requires splits."}
               </p>
             </div>
       </div>
@@ -654,11 +721,15 @@ export default function OutAndBackCalculator({ commitSha }) {
             </a>
           </div>
           <h1 className="text-4xl font-bold tracking-tight text-zinc-950 sm:text-5xl">
-            TT Split Calculator
+            TT Calculator
           </h1>
         </header>
 
-        <div className="mb-5 flex flex-wrap items-center justify-end gap-3">
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex gap-0.5 rounded-md bg-zinc-200/70 p-0.5">
+            <ToggleBtn active={mode === "splits"} onClick={() => setMode("splits")}>Out &amp; back</ToggleBtn>
+            <ToggleBtn active={mode === "p2p"} onClick={() => setMode("p2p")}>Point to point</ToggleBtn>
+          </div>
           <div className="flex items-center gap-2">
             <PresetMenu
               presets={presets}

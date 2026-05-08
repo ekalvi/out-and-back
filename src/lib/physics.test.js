@@ -4,6 +4,7 @@ import {
   findPowerForAvg,
   findPowerBackForAvgSpeed,
   impliedCdAFromSplits,
+  impliedCdAFromSingleSpeed,
   impliedWindSpeedFromSplits,
   optimizePowerSplit,
 } from "./physics.js";
@@ -93,6 +94,19 @@ describe("impliedCdAFromSplits", () => {
       vOutKph, vBackKph, pOut, pBack, vhwParallelMs,
       gradeOut: 0, gradeBack: 0, physics,
     });
+    expect(recovered).toBeCloseTo(trueCda, 2);
+  });
+});
+
+describe("impliedCdAFromSingleSpeed", () => {
+  it("recovers the seeded CdA when fed the speed it would produce", () => {
+    const trueCda = 0.245;
+    const physics = { mass: 84, crr: 0.004, lossDtPct: 2, rho: 1.225, draft: 1.0 };
+    const power = 250;
+    const vhwMs = 1.5;
+    const gradePct = 1.2;
+    const vKph = solveSpeedFromPower({ ...physics, cda: trueCda, power, vhwMs, gradePct }) * 3.6;
+    const recovered = impliedCdAFromSingleSpeed({ vKph, power, vhwMs, gradePct, physics });
     expect(recovered).toBeCloseTo(trueCda, 2);
   });
 });
