@@ -96,10 +96,23 @@ function legBackground(parallelHeadKph) {
   return `rgb(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)})`;
 }
 
-function bisectPowerForAbsDeltaV({ targetDvKph, displayedAvg, physics, vhwOutMs, vhwBackMs, gradeOut, gradeBack }) {
+function findPowerBackForAvgSpeed({ targetAvgSpeedKph, fixedPowerOut, physics, vhwOutMs, vhwBackMs, gradeOut, gradeBack }) {
+  const vOutKph = solveSpeedFromPower({ ...physics, power: fixedPowerOut, vhwMs: vhwOutMs, gradePct: gradeOut }) * 3.6;
+  let lo = 1, hi = 2000;
+  for (let i = 0; i < 50; i++) {
+    const mid = (lo + hi) / 2;
+    const vBackKph = solveSpeedFromPower({ ...physics, power: mid, vhwMs: vhwBackMs, gradePct: gradeBack }) * 3.6;
+    const avgKph = (2 * vOutKph * vBackKph) / (vOutKph + vBackKph);
+    if (avgKph < targetAvgSpeedKph) lo = mid;
+    else hi = mid;
+  }
+  return (lo + hi) / 2;
+}
+
+function bisectPowerForAbsDeltaV({ targetDvKph, targetAvgSpeedKph, physics, vhwOutMs, vhwBackMs, gradeOut, gradeBack }) {
   const compute = (powerOut) => {
-    const powerBack = findPowerForAvg({
-      targetAvg: displayedAvg, fixedPower: powerOut, fixedLeg: "out",
+    const powerBack = findPowerBackForAvgSpeed({
+      targetAvgSpeedKph, fixedPowerOut: powerOut,
       physics, vhwOutMs, vhwBackMs, gradeOut, gradeBack,
     });
     if (powerBack < 1 || powerBack > 1999) return null;
@@ -107,10 +120,8 @@ function bisectPowerForAbsDeltaV({ targetDvKph, displayedAvg, physics, vhwOutMs,
     const vBackMs = solveSpeedFromPower({ ...physics, power: powerBack, vhwMs: vhwBackMs, gradePct: gradeBack });
     return ((vBackMs - vOutMs) * 3.6) / 2;  // signed
   };
-  // Establish current sign with avg-equal pacing as reference
-  const refDv = compute(displayedAvg);
+  const refDv = compute(250);
   const targetSigned = (refDv >= 0 ? 1 : -1) * targetDvKph;
-  // Bisect powerOut over [50, 800]: signed dv decreases as powerOut increases
   let lo = 50, hi = 800;
   for (let i = 0; i < 50; i++) {
     const mid = (lo + hi) / 2;
@@ -364,14 +375,20 @@ export default function OutAndBackCalculator({ commitSha }) {
   const sliderPct = (Math.min(15, derivedDeltaV) / 15) * 100;
 
   function applyDeltaV(targetDvKph) {
+    const targetAvgSpeedKph = pAvg;
     const newPowerOut = bisectPowerForAbsDeltaV({
       targetDvKph,
-      displayedAvg,
+      targetAvgSpeedKph,
       physics: physicsBase,
       vhwOutMs, vhwBackMs, gradeOut, gradeBack,
     });
+    const newPowerBack = findPowerBackForAvgSpeed({
+      targetAvgSpeedKph, fixedPowerOut: newPowerOut,
+      physics: physicsBase, vhwOutMs, vhwBackMs, gradeOut, gradeBack,
+    });
     setPowerOut(Math.round(newPowerOut));
-    setAutoPowerSlider("back");
+    setPowerBack(Math.round(newPowerBack));
+    setAutoPowerSlider("avg");
   }
 
   function handleOptimize() {
@@ -381,8 +398,13 @@ export default function OutAndBackCalculator({ commitSha }) {
       vhwOutMs, vhwBackMs, gradeOut, gradeBack,
       distance,
     });
+    const optPowerBack = findPowerForAvg({
+      targetAvg: displayedAvg, fixedPower: optPowerOut, fixedLeg: "out",
+      physics: physicsBase, vhwOutMs, vhwBackMs, gradeOut, gradeBack,
+    });
     setPowerOut(Math.round(optPowerOut));
-    setAutoPowerSlider("back");
+    setPowerBack(Math.round(optPowerBack));
+    setAutoPowerSlider("avg");
   }
 
   function handleAutoChange(newTarget) {
