@@ -2,7 +2,6 @@ import { useState, useEffect } from "react";
 import { Wind, Clock, Gauge, ArrowRight, ChevronDown } from "lucide-react";
 
 const STATE_KEYS = [
-  ["mode", "mo", "string"],
   ["distance", "di", "number"],
   ["vOut", "vo", "number"],
   ["vBack", "vb", "number"],
@@ -189,8 +188,6 @@ function findPowerForAvg({ targetAvg, fixedPower, fixedLeg, physics, vhwOutMs, v
 }
 
 export default function OutAndBackCalculator({ commitSha }) {
-  const [mode, setMode] = useState("power");
-
   const [distance, setDistance] = useState(14.10);
   const [vOut, setVOut] = useState(36.3);
   const [vBack, setVBack] = useState(50.2);
@@ -220,7 +217,6 @@ export default function OutAndBackCalculator({ commitSha }) {
   });
 
   const SETTERS = {
-    mode: setMode,
     distance: setDistance,
     vOut: setVOut, vBack: setVBack,
     powerOut: setPowerOut, powerBack: setPowerBack, powerAvg: setPowerAvg,
@@ -252,18 +248,12 @@ export default function OutAndBackCalculator({ commitSha }) {
   const windCrossKph = Math.abs(effectiveWindKph * Math.sin(relAngleRad));
   const windParallelMs = windParallelKph / 3.6;
 
-  const isReverse = mode === "reverse";
-  const isPower = mode === "power";
-  const isActualMode = isReverse;
-
   const vhwOutMs = +windParallelMs;
   const vhwBackMs = -windParallelMs;
   const gradeOut = +grade;
   const gradeBack = -grade;
 
-  // First settle displayed power values (auto-compute) using user's CdA
-  // so the avg→leg bisections aren't moving CdA around.
-  const physicsForPower = { cda, mass: totalMass, crr, lossDtPct: lossDt, rho, draft };
+  const physicsBase = { cda, mass: totalMass, crr, lossDtPct: lossDt, rho, draft };
 
   let displayedOut = powerOut;
   let displayedBack = powerBack;
@@ -272,30 +262,15 @@ export default function OutAndBackCalculator({ commitSha }) {
   if (autoPowerSlider === "out") {
     displayedOut = findPowerForAvg({
       targetAvg: powerAvg, fixedPower: powerBack, fixedLeg: "back",
-      physics: physicsForPower, vhwOutMs, vhwBackMs, gradeOut, gradeBack,
+      physics: physicsBase, vhwOutMs, vhwBackMs, gradeOut, gradeBack,
     });
   } else if (autoPowerSlider === "back") {
     displayedBack = findPowerForAvg({
       targetAvg: powerAvg, fixedPower: powerOut, fixedLeg: "out",
-      physics: physicsForPower, vhwOutMs, vhwBackMs, gradeOut, gradeBack,
+      physics: physicsBase, vhwOutMs, vhwBackMs, gradeOut, gradeBack,
     });
   }
 
-  // In Actual mode, derive CdA from observed splits + power + course
-  const derivedCda = isActualMode
-    ? impliedCdAFromSplits({
-        vOutKph: vOut, vBackKph: vBack,
-        pOut: displayedOut, pBack: displayedBack,
-        vhwParallelMs: windParallelMs,
-        gradeOut, gradeBack,
-        physics: { mass: totalMass, crr, lossDtPct: lossDt, rho, draft },
-      })
-    : null;
-
-  const effectiveCda = isActualMode ? derivedCda : cda;
-  const physicsBase = { cda: effectiveCda, mass: totalMass, crr, lossDtPct: lossDt, rho, draft };
-
-  // Predicted leg speeds via the model (in Actual mode they will match observed by construction)
   const pOutMs = solveSpeedFromPower({ ...physicsBase, power: displayedOut, vhwMs: vhwOutMs, gradePct: gradeOut });
   const pBackMs = solveSpeedFromPower({ ...physicsBase, power: displayedBack, vhwMs: vhwBackMs, gradePct: gradeBack });
   const pOut = pOutMs * 3.6;
@@ -305,24 +280,29 @@ export default function OutAndBackCalculator({ commitSha }) {
     displayedAvg = (displayedOut / pOut + displayedBack / pBack) / (1 / pOut + 1 / pBack);
   }
 
-  // For penalty: in Actual mode use observed leg speeds; in Theoretical use predicted
-  const actualVOut = isActualMode ? vOut : pOut;
-  const actualVBack = isActualMode ? vBack : pBack;
-  const actualAvg = (2 * actualVOut * actualVBack) / (actualVOut + actualVBack);
+  // Calibration helper (always computed): given observed splits, what CdA fits?
+  const derivedCda = impliedCdAFromSplits({
+    vOutKph: vOut, vBackKph: vBack,
+    pOut: displayedOut, pBack: displayedBack,
+    vhwParallelMs: windParallelMs,
+    gradeOut, gradeBack,
+    physics: { mass: totalMass, crr, lossDtPct: lossDt, rho, draft },
+  });
 
+  const pAvg = (2 * pOut * pBack) / (pOut + pBack);
   const pIdealMs = solveSpeedFromPower({ ...physicsBase, power: displayedAvg, vhwMs: 0, gradePct: 0 });
   const pIdealAvg = pIdealMs * 3.6;
-  const pDvAvg = pIdealAvg - actualAvg;
+  const pDvAvg = pIdealAvg - pAvg;
   const pTBase = (distance / pIdealAvg) * 60;
-  const pTAct = (distance / actualAvg) * 60;
+  const pTAct = (distance / pAvg) * 60;
   const pDt = (pTAct - pTBase) * 60;
 
   const data = {
-    base: pIdealAvg, vOut: actualVOut, vBack: actualVBack, vAvg: actualAvg,
+    base: pIdealAvg, vOut: pOut, vBack: pBack, vAvg: pAvg,
     dvAvg: pDvAvg, tBase: pTBase, tAct: pTAct, dt: pDt,
     headOut: windParallelKph,
   };
-  const derivedDeltaV = Math.abs((actualVBack - actualVOut) / 2);
+  const derivedDeltaV = Math.abs((pBack - pOut) / 2);
 
   const formatTime = (mins) => {
     if (!isFinite(mins) || mins < 0) return "—:——.—";
@@ -367,7 +347,7 @@ export default function OutAndBackCalculator({ commitSha }) {
 
   function getCurrentState() {
     return {
-      mode, distance, vOut, vBack,
+      distance, vOut, vBack,
       powerOut, powerBack, powerAvg, autoPowerSlider,
       cda, riderMass, bikeMass,
       windKph, windFactorPct, windAngle, courseHeading,
@@ -409,11 +389,9 @@ export default function OutAndBackCalculator({ commitSha }) {
   const penaltyCard = (
     <Card className="mb-4">
       <div className="flex items-baseline justify-between">
-        <Eyebrow>
-          {isPower ? "Penalty vs flat & calm" : isReverse ? "vs no-wind potential" : "Penalty vs ideal"}
-        </Eyebrow>
+        <Eyebrow>Penalty vs flat &amp; calm</Eyebrow>
         <Num className="text-[11px] text-zinc-500">
-          {isPower ? "no-wind" : "base"} @ {data.base.toFixed(2)} kph
+          no-wind @ {data.base.toFixed(2)} kph
         </Num>
       </div>
 
@@ -502,194 +480,8 @@ export default function OutAndBackCalculator({ commitSha }) {
 
   const inputsCard = (
     <Card className="mb-8">
-      <Eyebrow>
-        {isPower ? "Power model inputs" : isReverse ? "Observed leg speeds" : "Forward inputs"}
-      </Eyebrow>
-      <div className="mt-4">
-        {mode === "forward" && (
-          <div className="space-y-5">
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
-                  Base speed
-                </label>
-                <div className="mono w-full rounded-lg border border-zinc-200 bg-zinc-100 px-3 py-2.5 text-base font-medium text-zinc-700">
-                  {pIdealAvg.toFixed(2)} <span className="text-[11px] text-zinc-400">kph</span>
-                </div>
-                <p className="mt-1 text-[10px] text-zinc-500">No-wind avg from Power tab</p>
-              </div>
-              <NumberInput label="Distance" value={distance} onChange={setDistance} unit="km" step={0.1} />
-            </div>
-            <div>
-              <div className="mb-2 flex items-baseline justify-between">
-                <label className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
-                  Δv per leg
-                </label>
-                <Num className="text-sm">
-                  <span className="font-semibold text-zinc-950">±{derivedDeltaV.toFixed(1)}</span>
-                  <span className="ml-1 text-zinc-400">kph</span>
-                </Num>
-              </div>
-              <input
-                type="range"
-                min="0"
-                max="15"
-                step="0.5"
-                value={Math.min(15, derivedDeltaV)}
-                onChange={(e) => applyDeltaV(parseFloat(e.target.value))}
-                className="slider-thumb h-2 w-full cursor-pointer rounded-full"
-                style={{
-                  background: `linear-gradient(to right, #18181b 0%, #18181b ${sliderPct}%, #e4e4e7 ${sliderPct}%, #e4e4e7 100%)`,
-                }}
-              />
-              <div className="mono mt-1.5 flex justify-between text-[10px] text-zinc-400">
-                <span>0</span>
-                <span>5</span>
-                <span>10</span>
-                <span>15</span>
-              </div>
-              <p className="mt-2 text-[10px] text-zinc-500">Adjusts the power split (out vs back, holding avg) to produce this Δv. Wind/grade unchanged.</p>
-            </div>
-          </div>
-        )}
-        {mode === "reverse" && (
-          <div className="space-y-5">
-            <div className="grid grid-cols-2 gap-3">
-              <NumberInput label="Out leg (observed)" value={vOut} onChange={setVOut} unit="kph" step={0.1} />
-              <NumberInput label="Back leg (observed)" value={vBack} onChange={setVBack} unit="kph" step={0.1} />
-            </div>
-            <div className="space-y-3 rounded-lg border border-zinc-200 bg-zinc-50/60 p-3">
-              <div className="flex items-center justify-between">
-                <Eyebrow>Power · auto-compute</Eyebrow>
-                <div className="flex gap-0.5 rounded-md bg-zinc-200/70 p-0.5">
-                  <ToggleBtn active={autoPowerSlider === "out"} onClick={() => handleAutoChange("out")}>Out</ToggleBtn>
-                  <ToggleBtn active={autoPowerSlider === "back"} onClick={() => handleAutoChange("back")}>Back</ToggleBtn>
-                  <ToggleBtn active={autoPowerSlider === "avg"} onClick={() => handleAutoChange("avg")}>Avg</ToggleBtn>
-                </div>
-              </div>
-              <SliderInput
-                label="Avg power"
-                value={autoPowerSlider === "avg" ? Math.round(displayedAvg) : powerAvg}
-                onChange={setPowerAvg}
-                min={100} max={500} step={5} unit="W"
-                disabled={autoPowerSlider === "avg"}
-              />
-              <SliderInput
-                label="Out leg power"
-                value={autoPowerSlider === "out" ? Math.round(displayedOut) : powerOut}
-                onChange={setPowerOut}
-                min={100} max={500} step={5} unit="W"
-                disabled={autoPowerSlider === "out"}
-              />
-              <SliderInput
-                label="Back leg power"
-                value={autoPowerSlider === "back" ? Math.round(displayedBack) : powerBack}
-                onChange={setPowerBack}
-                min={100} max={500} step={5} unit="W"
-                disabled={autoPowerSlider === "back"}
-              />
-            </div>
-
-            <div className="space-y-3 rounded-lg border border-zinc-200 bg-zinc-50/60 p-3">
-              <Eyebrow>Course & wind</Eyebrow>
-              <SliderInput label="Course heading (out)" value={courseHeading} onChange={setCourseHeading} min={0} max={360} step={5} unit="°" />
-              <SliderInput label="Wind speed" value={windKph} onChange={setWindKph} min={0} max={50} step={0.5} unit="kph" />
-              <SliderInput label="Wind from" value={windAngle} onChange={setWindAngle} min={0} max={360} step={5} unit="°" />
-              <div className="flex items-center gap-3 pt-1">
-                <WindCompass courseHeadingDeg={courseHeading} windAngleDeg={windAngle} hasWind={windKph > 0.05} />
-                <div className="mono flex-1 space-y-1 text-[11px]">
-                  <div className="flex justify-between">
-                    <span className="text-zinc-500">Out leg</span>
-                    <span className="text-zinc-900">
-                      {Math.abs(windParallelKph) < 0.05
-                        ? "—"
-                        : (windParallelKph > 0 ? "−" : "+") + Math.abs(windParallelKph).toFixed(1) + " kph"}
-                      <span className="ml-1 text-zinc-400">
-                        {Math.abs(windParallelKph) < 0.05 ? "" : windParallelKph > 0 ? "head" : "tail"}
-                      </span>
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-zinc-500">Back leg</span>
-                    <span className="text-zinc-900">
-                      {Math.abs(windParallelKph) < 0.05
-                        ? "—"
-                        : (windParallelKph > 0 ? "+" : "−") + Math.abs(windParallelKph).toFixed(1) + " kph"}
-                      <span className="ml-1 text-zinc-400">
-                        {Math.abs(windParallelKph) < 0.05 ? "" : windParallelKph > 0 ? "tail" : "head"}
-                      </span>
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-zinc-500">Crosswind</span>
-                    <span className="text-zinc-900">{windCrossKph.toFixed(1)} kph</span>
-                  </div>
-                  <div className="flex justify-between border-t border-zinc-200 pt-1 text-zinc-400">
-                    <span>Effective</span>
-                    <span>{effectiveWindKph.toFixed(1)} kph ({windKph.toFixed(1)} × {windFactor.toFixed(2)})</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <NumberInput label="Distance" value={distance} onChange={setDistance} unit="km" step={0.1} />
-              <NumberInput label="Grade (out)" value={grade} onChange={setGrade} unit="%" step={0.1} />
-            </div>
-            <NumberInput label="Rider mass" value={riderMass} onChange={setRiderMass} unit="kg" step={0.5} />
-
-            <button
-              type="button"
-              onClick={() => setAdvancedOpen((o) => !o)}
-              className="flex w-full items-center justify-between rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-600 transition hover:border-zinc-300 hover:text-zinc-900"
-            >
-              <span>Advanced</span>
-              <ChevronDown
-                className={"h-3.5 w-3.5 transition-transform " + (advancedOpen ? "rotate-180" : "")}
-                strokeWidth={2.5}
-              />
-            </button>
-            {advancedOpen && (
-              <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <NumberInput label="Bike mass" value={bikeMass} onChange={setBikeMass} unit="kg" step={0.1} />
-                  <NumberInput label="Wind factor" value={windFactorPct} onChange={setWindFactorPct} unit="%" step={5} />
-                  <NumberInput label="Crr" value={crr} onChange={setCrr} unit="" step={0.0005} />
-                  <NumberInput label="Drivetrain loss" value={lossDt} onChange={setLossDt} unit="%" step={0.5} />
-                  <NumberInput label="Air density" value={rho} onChange={setRho} unit="kg/m³" step={0.005} />
-                  <NumberInput label="Draft factor" value={draft} onChange={setDraft} unit="" step={0.05} />
-                </div>
-                <p className="text-[10px] leading-relaxed text-zinc-500">
-                  Wind factor: weather-app wind speed is measured at ~10 m. At cyclist height (~1-2 m), wind is typically 60-80% of that. If derived CdA looks unreasonable, adjust this first.
-                </p>
-              </div>
-            )}
-
-            <div className="grid grid-cols-2 gap-3">
-              <div className="flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5">
-                <span className="text-[11px] font-semibold uppercase tracking-wider text-amber-800">Derived CdA</span>
-                <Num className="text-base font-semibold text-amber-900">
-                  {(derivedCda ?? 0).toFixed(3)} <span className="text-xs font-normal text-amber-700">m²</span>
-                </Num>
-              </div>
-              <div className="flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5">
-                <span className="text-[11px] font-semibold uppercase tracking-wider text-emerald-800">No-wind avg</span>
-                <Num className="text-base font-semibold text-emerald-900">
-                  {pIdealAvg.toFixed(2)} <span className="text-xs font-normal text-emerald-700">kph</span>
-                </Num>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => derivedCda && setCda(parseFloat(derivedCda.toFixed(3)))}
-              className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-700 transition hover:border-zinc-300 hover:bg-zinc-50 hover:text-zinc-900"
-            >
-              Use derived CdA in theoretical mode
-            </button>
-          </div>
-        )}
-        {mode === "power" && (
-          <div className="space-y-5">
+      <Eyebrow>Inputs</Eyebrow>
+      <div className="mt-4 space-y-5">
             <div className="space-y-3 rounded-lg border border-zinc-200 bg-zinc-50/60 p-3">
               <div className="flex items-center justify-between">
                 <Eyebrow>Power · auto-compute</Eyebrow>
@@ -728,6 +520,37 @@ export default function OutAndBackCalculator({ commitSha }) {
               >
                 Optimize split for fastest time
               </button>
+            </div>
+
+            <div>
+              <div className="mb-2 flex items-baseline justify-between">
+                <label className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+                  Δv per leg
+                </label>
+                <Num className="text-sm">
+                  <span className="font-semibold text-zinc-950">±{derivedDeltaV.toFixed(1)}</span>
+                  <span className="ml-1 text-zinc-400">kph</span>
+                </Num>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="15"
+                step="0.5"
+                value={Math.min(15, derivedDeltaV)}
+                onChange={(e) => applyDeltaV(parseFloat(e.target.value))}
+                className="slider-thumb h-2 w-full cursor-pointer rounded-full"
+                style={{
+                  background: `linear-gradient(to right, #18181b 0%, #18181b ${sliderPct}%, #e4e4e7 ${sliderPct}%, #e4e4e7 100%)`,
+                }}
+              />
+              <div className="mono mt-1.5 flex justify-between text-[10px] text-zinc-400">
+                <span>0</span>
+                <span>5</span>
+                <span>10</span>
+                <span>15</span>
+              </div>
+              <p className="mt-2 text-[10px] text-zinc-500">Adjusts the power split (out vs back, holding avg) to produce this Δv. Wind/grade unchanged.</p>
             </div>
 
             <div className="space-y-3 rounded-lg border border-zinc-200 bg-zinc-50/60 p-3">
@@ -818,8 +641,30 @@ export default function OutAndBackCalculator({ commitSha }) {
                 {pIdealAvg.toFixed(2)} <span className="text-xs font-normal text-emerald-700">kph</span>
               </Num>
             </div>
-          </div>
-        )}
+
+            <div className="space-y-3 rounded-lg border border-zinc-200 bg-zinc-50/60 p-3">
+              <Eyebrow>Calibrate from actual ride</Eyebrow>
+              <div className="grid grid-cols-2 gap-3">
+                <NumberInput label="Out leg observed" value={vOut} onChange={setVOut} unit="kph" step={0.1} />
+                <NumberInput label="Back leg observed" value={vBack} onChange={setVBack} unit="kph" step={0.1} />
+              </div>
+              <div className="flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5">
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-amber-800">Derived CdA</span>
+                <Num className="text-base font-semibold text-amber-900">
+                  {derivedCda.toFixed(3)} <span className="text-xs font-normal text-amber-700">m²</span>
+                </Num>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCda(parseFloat(derivedCda.toFixed(3)))}
+                className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-700 transition hover:border-zinc-300 hover:bg-zinc-50 hover:text-zinc-900"
+              >
+                Use derived CdA
+              </button>
+              <p className="text-[10px] leading-relaxed text-zinc-500">
+                Enter your actual leg speeds to back-solve CdA from this ride. Click "Use derived CdA" to seed the CdA input above. If the derived value seems unreasonable, adjust Wind factor in Advanced.
+              </p>
+            </div>
       </div>
     </Card>
   );
@@ -882,18 +727,7 @@ export default function OutAndBackCalculator({ commitSha }) {
           </p>
         </header>
 
-        <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-          <div className="inline-flex gap-0.5 rounded-xl bg-zinc-200/70 p-1">
-            <ModeTab active={mode === "power"} onClick={() => setMode("power")}>
-              Power
-            </ModeTab>
-            <ModeTab active={mode === "forward"} onClick={() => setMode("forward")}>
-              Δv
-            </ModeTab>
-            <ModeTab active={mode === "reverse"} onClick={() => setMode("reverse")}>
-              Splits
-            </ModeTab>
-          </div>
+        <div className="mb-5 flex flex-wrap items-center justify-end gap-3">
           <div className="flex items-center gap-2">
             <PresetMenu
               presets={presets}
@@ -918,40 +752,27 @@ export default function OutAndBackCalculator({ commitSha }) {
         {courseCard}
         {inputsCard}
 
-        {isPower ? (
-          <>
-            <p className="mono px-1 text-[11px] leading-relaxed text-zinc-500">
-              P·η = ½·ρ·CdA·draft·(v + v_w)²·v + (m_r + m_b)·g·(Crr·cosθ + sinθ)·v
-            </p>
-            <p className="mt-1.5 px-1 text-[11px] leading-relaxed text-zinc-400">
-              v, v_w in m/s (UI inputs in kph are divided by 3.6 internally) · θ = atan(grade)
-            </p>
-            <p className="mt-2 px-1 text-xs leading-relaxed text-zinc-500">
-              At fixed power, headwind costs more time than the equivalent tailwind saves — aero drag scales with apparent-wind squared. Wind direction is decomposed into a parallel (head/tail) and crosswind component using your course heading; only the parallel piece changes apparent wind here.
-            </p>
-            <p className="mt-2 px-1 text-[11px] leading-relaxed text-zinc-500">
-              Power model adapted from{" "}
-              <a
-                href="https://github.com/gmerritt123/ttt_model/"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="underline decoration-zinc-300 underline-offset-2 transition hover:text-zinc-900 hover:decoration-zinc-500"
-              >
-                gmerritt123/ttt_model
-              </a>
-              .
-            </p>
-          </>
-        ) : (
-          <>
-            <p className="mono px-1 text-[11px] leading-relaxed text-zinc-500">
-              v̄ = 2·v₁·v₂ / (v₁ + v₂) &nbsp;·&nbsp; Δv̄ ≈ Δv² / v_base
-            </p>
-            <p className="mt-2 px-1 text-xs leading-relaxed text-zinc-500">
-              Penalty is quadratic in Δv. ±2 kph barely costs anything; ±10 costs almost a minute on 14 km.
-            </p>
-          </>
-        )}
+        <p className="mono px-1 text-[11px] leading-relaxed text-zinc-500">
+          P·η = ½·ρ·CdA·draft·(v + v_w)²·v + (m_r + m_b)·g·(Crr·cosθ + sinθ)·v
+        </p>
+        <p className="mt-1.5 px-1 text-[11px] leading-relaxed text-zinc-400">
+          v, v_w in m/s (UI inputs in kph are divided by 3.6 internally) · θ = atan(grade)
+        </p>
+        <p className="mt-2 px-1 text-xs leading-relaxed text-zinc-500">
+          At fixed power, headwind costs more time than the equivalent tailwind saves — aero drag scales with apparent-wind squared. Wind direction is decomposed into a parallel (head/tail) and crosswind component using your course heading; only the parallel piece changes apparent wind here.
+        </p>
+        <p className="mt-2 px-1 text-[11px] leading-relaxed text-zinc-500">
+          Power model adapted from{" "}
+          <a
+            href="https://github.com/gmerritt123/ttt_model/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline decoration-zinc-300 underline-offset-2 transition hover:text-zinc-900 hover:decoration-zinc-500"
+          >
+            gmerritt123/ttt_model
+          </a>
+          .
+        </p>
 
         <Footer commitSha={commitSha} />
       </div>
@@ -1055,22 +876,6 @@ function PresetMenu({ presets, onLoad, onSave, onDelete }) {
         </>
       )}
     </div>
-  );
-}
-
-function ModeTab({ active, onClick, children }) {
-  return (
-    <button
-      onClick={onClick}
-      className={
-        "rounded-lg px-4 py-1.5 text-sm font-medium transition-all " +
-        (active
-          ? "bg-white text-zinc-950 shadow-sm"
-          : "text-zinc-600 hover:text-zinc-950")
-      }
-    >
-      {children}
-    </button>
   );
 }
 
