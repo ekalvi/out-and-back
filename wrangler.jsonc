@@ -2,13 +2,17 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "out-and-back",
   "compatibility_date": "2026-05-07",
+  "main": "worker/index.js",
   "workers_dev": false,
   "preview_urls": true,
   "routes": [
+    { "pattern": "outback.q5m.ai", "custom_domain": true },
     { "pattern": "outback.q5m.io", "custom_domain": true }
   ],
   "assets": {
     "directory": "./dist",
+    "binding": "ASSETS",
+    "run_worker_first": true,
     "not_found_handling": "single-page-application"
   }
 }

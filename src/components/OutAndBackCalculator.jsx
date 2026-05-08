@@ -1121,7 +1121,12 @@ function Footer({ commitSha }) {
           </a>
         </span>
         <span className="flex items-center gap-3">
-          <span className="flex items-center gap-1.5">
+          <a
+            href="https://www.q5m.ai"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 transition hover:text-zinc-900"
+          >
             <svg
               xmlns="http://www.w3.org/2000/svg"
               width="14"
@@ -1139,7 +1144,7 @@ function Footer({ commitSha }) {
               <path d="M15.7 15.7c4.52-4.54 6.54-9.87 4.5-11.9-2.03-2.04-7.36-.02-11.9 4.5-4.52 4.54-6.54 9.87-4.5 11.9 2.03 2.04 7.36.02 11.9-4.5Z" />
             </svg>
             <span>q5m</span>
-          </span>
+          </a>
           <a
             href={REPO_URL}
             target="_blank"
