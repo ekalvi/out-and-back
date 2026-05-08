@@ -474,11 +474,24 @@ export default function OutAndBackCalculator({ commitSha }) {
       <div className="flex items-baseline justify-between">
         <Eyebrow>Course profile</Eyebrow>
         <Num className="text-[11px] text-zinc-500">
-          {distance.toFixed(2)} km · turn at {(distance / 2).toFixed(2)}
+          turn at {(distance / 2).toFixed(2)} km
         </Num>
       </div>
 
-      <div className="relative mt-4">
+      <div className="mt-4 grid grid-cols-[1fr_auto] items-center gap-4">
+        <div className="grid grid-cols-2 gap-x-3 gap-y-3">
+          <NumberInput label="Distance" value={distance} onChange={setDistance} unit="km" step={0.1} />
+          <SliderInput label="Heading" value={courseHeading} onChange={setCourseHeading} min={0} max={360} step={5} unit="°" />
+          <SliderInput label="Wind speed" value={windKph} onChange={setWindKph} min={0} max={50} step={0.5} unit="kph" />
+          <SliderInput label="Wind from" value={windAngle} onChange={setWindAngle} min={0} max={360} step={5} unit="°" />
+        </div>
+        <WindCompass courseHeadingDeg={courseHeading} windAngleDeg={windAngle} hasWind={windKph > 0.05} />
+      </div>
+
+      <div className="relative mt-5">
+        <div className="relative mb-1.5 h-4">
+          <ResetIcon className="absolute left-1/2 top-0 h-4 w-4 -translate-x-1/2 text-zinc-500" />
+        </div>
         <div className="flex h-9 overflow-hidden rounded-lg border border-zinc-200">
           <div
             className="flex flex-1 items-center justify-between border-r border-zinc-200 px-3 transition-colors"
@@ -584,58 +597,11 @@ export default function OutAndBackCalculator({ commitSha }) {
               <p className="mt-2 text-[10px] text-zinc-500">Adjusts the power split (out vs back, holding avg) to produce this Δv. Wind/grade unchanged.</p>
             </div>
 
-            <div className="space-y-3 rounded-lg border border-zinc-200 bg-zinc-50/60 p-3">
-              <Eyebrow>Course & wind</Eyebrow>
-              <SliderInput label="Course heading (out)" value={courseHeading} onChange={setCourseHeading} min={0} max={360} step={5} unit="°" />
-              <SliderInput label="Wind speed" value={windKph} onChange={setWindKph} min={0} max={50} step={0.5} unit="kph" />
-              <SliderInput label="Wind from" value={windAngle} onChange={setWindAngle} min={0} max={360} step={5} unit="°" />
-              <div className="flex items-center gap-3 pt-1">
-                <WindCompass courseHeadingDeg={courseHeading} windAngleDeg={windAngle} hasWind={windKph > 0.05} />
-                <div className="mono flex-1 space-y-1 text-[11px]">
-                  <div className="flex justify-between">
-                    <span className="text-zinc-500">Out leg</span>
-                    <span className="text-zinc-900">
-                      {Math.abs(windParallelKph) < 0.05
-                        ? "—"
-                        : (windParallelKph > 0 ? "−" : "+") +
-                          Math.abs(windParallelKph).toFixed(1) +
-                          " kph"}
-                      <span className="ml-1 text-zinc-400">
-                        {Math.abs(windParallelKph) < 0.05 ? "" : windParallelKph > 0 ? "head" : "tail"}
-                      </span>
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-zinc-500">Back leg</span>
-                    <span className="text-zinc-900">
-                      {Math.abs(windParallelKph) < 0.05
-                        ? "—"
-                        : (windParallelKph > 0 ? "+" : "−") +
-                          Math.abs(windParallelKph).toFixed(1) +
-                          " kph"}
-                      <span className="ml-1 text-zinc-400">
-                        {Math.abs(windParallelKph) < 0.05 ? "" : windParallelKph > 0 ? "tail" : "head"}
-                      </span>
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-zinc-500">Crosswind</span>
-                    <span className="text-zinc-900">{windCrossKph.toFixed(1)} kph</span>
-                  </div>
-                  <div className="flex justify-between border-t border-zinc-200 pt-1 text-zinc-400">
-                    <span>Effective</span>
-                    <span>{effectiveWindKph.toFixed(1)} kph ({windKph.toFixed(1)} × {windFactor.toFixed(2)})</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
             <div className="grid grid-cols-2 gap-3">
               <NumberInput label="CdA" value={cda} onChange={setCda} unit="m²" step={0.005} />
               <NumberInput label="Rider mass" value={riderMass} onChange={setRiderMass} unit="kg" step={0.5} />
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <NumberInput label="Distance" value={distance} onChange={setDistance} unit="km" step={0.1} />
               <NumberInput label="Grade (out)" value={grade} onChange={setGrade} unit="%" step={0.1} />
             </div>
             <button
