@@ -175,4 +175,47 @@ describe("optimizePowerSplit", () => {
     // Optimal split pushes harder into the headwind leg.
     expect(optPowerOut).toBeGreaterThan(targetAvg);
   });
+
+  it("respects the avg-power constraint on a climb-out / descent-back course", () => {
+    // Regression for Gaelen's bug: with a steep descent on the back leg,
+    // findPowerForAvg's bisection saturates at its lower bracket (pBack≈1)
+    // for any sufficiently high powerOut, and the harmonic-mean avg drifts
+    // away from targetAvg. The pre-fix optimizer treated that whole plateau
+    // as feasible, slid up it, and returned the upper search bound — and the
+    // chosen bound depended on where the search started ("different initial
+    // states arrive at different optima"). The fix rejects points where the
+    // achieved avg doesn't actually match the requested target.
+    const physics = PHYSICS;
+    const targetAvg = 250;
+    const optPowerOut = optimizePowerSplit({
+      targetAvg, physics,
+      vhwOutMs: 0, vhwBackMs: 0, gradeOut: 4, gradeBack: -4,
+      distance: 16,
+    });
+    const optPowerBack = findPowerForAvg({
+      targetAvg, fixedPower: optPowerOut, fixedLeg: "out",
+      physics, vhwOutMs: 0, vhwBackMs: 0, gradeOut: 4, gradeBack: -4,
+    });
+    const vO = solveSpeedFromPower({ ...physics, power: optPowerOut, vhwMs: 0, gradePct: 4 });
+    const vB = solveSpeedFromPower({ ...physics, power: optPowerBack, vhwMs: 0, gradePct: -4 });
+    const achievedAvg = (optPowerOut / vO + optPowerBack / vB) / (1 / vO + 1 / vB);
+    expect(achievedAvg).toBeCloseTo(targetAvg, 0);
+    // Pre-fix this returned ~800 (the old hard-coded upper bracket); guard
+    // against the boundary-stuck result.
+    expect(optPowerOut).toBeLessThan(500);
+  });
+
+  it("converges to the same optimum regardless of which feasible region the bracket starts in", () => {
+    // Same scenario, two calls — confirms determinism after the constraint
+    // guard + pre-scan. The pre-fix optimizer could return different values
+    // depending on which infeasible plateau the golden-section walked into.
+    const args = {
+      targetAvg: 250, physics: PHYSICS,
+      vhwOutMs: 4, vhwBackMs: -4, gradeOut: 1, gradeBack: -1,
+      distance: 16,
+    };
+    const a = optimizePowerSplit(args);
+    const b = optimizePowerSplit(args);
+    expect(a).toBe(b);
+  });
 });

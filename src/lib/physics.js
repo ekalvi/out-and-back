@@ -131,24 +131,47 @@ export function impliedWindSpeedFromSplits({ vOutKph, vBackKph, pOut, pBack, fac
 }
 
 export function optimizePowerSplit({ targetAvg, physics, vhwOutMs, vhwBackMs, gradeOut, gradeBack, distance }) {
+  const halfM = (distance * 1000) / 2;
   const timeAt = (powerOut) => {
     const powerBack = findPowerForAvg({
       targetAvg, fixedPower: powerOut, fixedLeg: "out",
       physics, vhwOutMs, vhwBackMs, gradeOut, gradeBack,
     });
-    if (powerBack < 1 || powerBack > 1999) return Infinity;
     const vOutMs = solveSpeedFromPower({ ...physics, power: powerOut, vhwMs: vhwOutMs, gradePct: gradeOut });
     const vBackMs = solveSpeedFromPower({ ...physics, power: powerBack, vhwMs: vhwBackMs, gradePct: gradeBack });
-    const halfM = (distance * 1000) / 2;
+    // findPowerForAvg can saturate at its bracket (powerBack=1 or 1999) when
+    // the avg-power constraint is infeasible at this powerOut. In that case
+    // the achieved harmonic-mean avg drifts from targetAvg; without this guard
+    // the optimizer slides along the infeasible plateau and returns whichever
+    // boundary the search happened to enter, giving different "optima" from
+    // different starting states.
+    const achievedAvg = (powerOut / vOutMs + powerBack / vBackMs) / (1 / vOutMs + 1 / vBackMs);
+    if (Math.abs(achievedAvg - targetAvg) > 0.5) return Infinity;
     return halfM / vOutMs + halfM / vBackMs;
   };
-  // Golden-section search over powerOut in [50, 800]
+  // Coarse pre-scan over [1, 1999] to bracket the feasible-region minimum.
+  // Golden-section needs the optimum inside the initial bracket; the feasible
+  // band can be a small slice of the full range (e.g. on a steep climb/descent
+  // the avg-power constraint saturates at one boundary), and a wide bracket of
+  // mostly-infeasible points lets Infinity-vs-Infinity comparisons drag the
+  // search to whichever endpoint the loop happens to enter.
+  const FULL_LO = 1, FULL_HI = 1999;
+  const N = 41;
+  const step = (FULL_HI - FULL_LO) / (N - 1);
+  let bestI = -1, bestT = Infinity;
+  for (let i = 0; i < N; i++) {
+    const t = timeAt(FULL_LO + i * step);
+    if (t < bestT) { bestT = t; bestI = i; }
+  }
+  if (bestI < 0) return targetAvg; // no feasible powerOut anywhere in range
+
+  let lo = FULL_LO + Math.max(0, bestI - 1) * step;
+  let hi = FULL_LO + Math.min(N - 1, bestI + 1) * step;
   const phi = (Math.sqrt(5) - 1) / 2;
-  let lo = 50, hi = 800;
   let m1 = hi - phi * (hi - lo);
   let m2 = lo + phi * (hi - lo);
   let t1 = timeAt(m1), t2 = timeAt(m2);
-  for (let i = 0; i < 60 && hi - lo > 0.5; i++) {
+  for (let i = 0; i < 60 && hi - lo > 1e-3; i++) {
     if (t1 < t2) {
       hi = m2; m2 = m1; t2 = t1;
       m1 = hi - phi * (hi - lo); t1 = timeAt(m1);
